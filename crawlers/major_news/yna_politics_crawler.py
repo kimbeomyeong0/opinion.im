@@ -28,7 +28,7 @@ from dataclasses import dataclass
 from contextlib import asynccontextmanager
 
 sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..', 'utils'))
-from legacy.supabase_manager_v2 import SupabaseManagerV2
+from utils.supabase_manager_unified import UnifiedSupabaseManager
 
 # 로깅 설정
 logging.basicConfig(level=logging.INFO)
@@ -93,7 +93,7 @@ class YnaPoliticsCrawler:
     async def __aenter__(self):
         """비동기 컨텍스트 매니저 진입"""
         # Supabase 매니저 초기화
-        self.supabase_manager = SupabaseManagerV2()
+        self.supabase_manager = UnifiedSupabaseManager()
         
         # HTTP 세션 설정 (최적화된 커넥터)
         self.connector = aiohttp.TCPConnector(

@@ -43,7 +43,7 @@ from typing import List, Dict, Optional, Set
 import logging
 from urllib.parse import urljoin
 from bs4 import BeautifulSoup
-from utils.legacy.supabase_manager_v2 import SupabaseManagerV2
+from utils.supabase_manager_unified import UnifiedSupabaseManager
 
 # 로깅 설정
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -57,7 +57,7 @@ class SBSPoliticsCrawler:
         self.target_count = 50
         
         # Supabase 연결
-        self.supabase_manager = SupabaseManagerV2()
+        self.supabase_manager = UnifiedSupabaseManager()
         
         # SBS 설정
         self.base_url = "https://news.sbs.co.kr"

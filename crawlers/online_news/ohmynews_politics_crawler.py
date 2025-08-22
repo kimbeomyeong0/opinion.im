@@ -12,14 +12,14 @@ import aiohttp
 import time
 from bs4 import BeautifulSoup
 from urllib.parse import urljoin
-from supabase_manager_v2 import SupabaseManagerV2
+from utils.supabase_manager_unified import UnifiedSupabaseManager
 import re
 
 class OhMyNewsPoliticsCrawler:
     def __init__(self):
         self.base_url = "https://www.ohmynews.com/NWS_Web/ArticlePage/Total_Article.aspx"
         self.politics_url = f"{self.base_url}?PAGE_CD=C0400"
-        self.manager = SupabaseManagerV2()
+        self.manager = UnifiedSupabaseManager()
         self.media_id = 9  # 오마이뉴스 media_id
         self.issue_id = 1  # 기본 issue_id
         self.collected_articles = set()

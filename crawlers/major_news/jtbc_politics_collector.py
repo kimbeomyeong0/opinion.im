@@ -16,7 +16,7 @@ from datetime import datetime
 from typing import List, Dict, Optional, Set
 import logging
 from urllib.parse import urljoin
-from utils.legacy.supabase_manager_v2 import SupabaseManagerV2
+from utils.supabase_manager_unified import UnifiedSupabaseManager
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -27,7 +27,7 @@ class JTBCPoliticsCollector:
         self.seen_urls: Set[str] = set()
         self.collected_count = 0
         self.target_count = 50
-        self.supabase_manager = SupabaseManagerV2()
+        self.supabase_manager = UnifiedSupabaseManager()
         
         # JTBC 설정
         self.base_url = "https://news-api.jtbc.co.kr"

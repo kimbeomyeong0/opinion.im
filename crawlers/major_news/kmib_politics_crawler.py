@@ -17,7 +17,7 @@ from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TimeElapsedColumn
 from rich.table import Table
 from rich.panel import Panel
-from supabase_manager_v2 import SupabaseManagerV2
+from utils.supabase_manager_unified import UnifiedSupabaseManager
 from urllib.parse import urljoin
 
 # 로깅 설정
@@ -33,7 +33,7 @@ class KMIBPoliticsCrawler:
         self.politics_url = "https://www.kmib.co.kr/article/listing.asp?sid1=pol"
         self.media_name = "국민일보"
         self.media_bias = "Center"
-        self.supabase_manager = SupabaseManagerV2()
+        self.supabase_manager = UnifiedSupabaseManager()
         self.session = None
         
     async def __aenter__(self):

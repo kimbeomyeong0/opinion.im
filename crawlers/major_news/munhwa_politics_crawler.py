@@ -18,7 +18,7 @@ from rich.table import Table
 from rich.panel import Panel
 from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TimeElapsedColumn
 import logging
-from supabase_manager_v2 import SupabaseManagerV2
+from utils.supabase_manager_unified import UnifiedSupabaseManager
 
 # 로깅 설정
 logging.basicConfig(level=logging.INFO)
@@ -31,7 +31,7 @@ class MunhwaPoliticsCrawler:
         self.max_articles = max_articles
         self.console = Console()
         self.session: Optional[aiohttp.ClientSession] = None
-        self.supabase_manager = SupabaseManagerV2()
+        self.supabase_manager = UnifiedSupabaseManager()
         
         # 문화일보 설정
         self.base_url = "https://www.munhwa.com"

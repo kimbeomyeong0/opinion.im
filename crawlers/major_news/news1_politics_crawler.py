@@ -24,7 +24,7 @@ import sys
 import os
 from playwright.async_api import async_playwright
 sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..', 'utils'))
-from legacy.supabase_manager_v2 import SupabaseManagerV2
+from utils.supabase_manager_unified import UnifiedSupabaseManager
 
 # 로깅 설정
 logging.basicConfig(level=logging.INFO)
@@ -37,7 +37,7 @@ class News1PoliticsCrawler:
     def __init__(self):
         self.base_url = "https://www.news1.kr"
         self.politics_url = "https://www.news1.kr/politics"
-        self.supabase_manager = SupabaseManagerV2()
+        self.supabase_manager = UnifiedSupabaseManager()
         self.media_outlet = "뉴스1"
         self.media_bias = "left"  # 뉴스1은 좌편향 성향
         

@@ -17,7 +17,7 @@ from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TimeEl
 from rich.table import Table
 from rich.panel import Panel
 from rich.text import Text
-from supabase_manager_v2 import SupabaseManagerV2
+from utils.supabase_manager_unified import UnifiedSupabaseManager
 from playwright.async_api import async_playwright
 
 # 로깅 설정
@@ -31,7 +31,7 @@ class SegyePoliticsCrawler:
         self.base_url = "https://www.segye.com"
         self.politics_url = "https://www.segye.com/news/politics"
         self.console = Console()
-        self.supabase_manager = SupabaseManagerV2()
+        self.supabase_manager = UnifiedSupabaseManager()
         
         # 세션 설정
         self.session = None

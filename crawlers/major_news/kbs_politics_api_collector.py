@@ -38,7 +38,7 @@ from datetime import datetime, timedelta
 from typing import List, Dict, Optional, Set
 import logging
 from tqdm import tqdm
-from utils.legacy.supabase_manager_v2 import SupabaseManagerV2
+from utils.supabase_manager_unified import UnifiedSupabaseManager
 
 # 로깅 설정
 logging.basicConfig(level=logging.INFO)
@@ -50,7 +50,7 @@ class KBSPoliticsAPICollector:
         self.seen_urls: Set[str] = set()
         
         # Supabase 연결
-        self.supabase_manager = SupabaseManagerV2()
+        self.supabase_manager = UnifiedSupabaseManager()
         
         # 오늘 날짜 설정
         self.today = datetime.now()

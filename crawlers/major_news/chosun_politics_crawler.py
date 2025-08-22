@@ -15,7 +15,7 @@ from datetime import datetime
 import re
 from urllib.parse import urljoin, urlparse
 import logging
-from supabase_manager_v2 import SupabaseManagerV2
+from utils.supabase_manager_unified import UnifiedSupabaseManager
 import json
 from playwright.async_api import async_playwright
 
@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 class ChosunPoliticsCrawler:
     def __init__(self):
         self.console = Console()
-        self.supabase = SupabaseManagerV2()
+        self.supabase = UnifiedSupabaseManager()
         self.base_url = "https://www.chosun.com"
         self.politics_url = "https://www.chosun.com/politics/"
         self.session: Optional[aiohttp.ClientSession] = None

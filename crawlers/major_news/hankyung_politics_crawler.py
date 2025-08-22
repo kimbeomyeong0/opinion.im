@@ -19,7 +19,7 @@ from tqdm import tqdm
 from typing import List, Dict, Optional, Set
 from datetime import datetime
 import logging
-from utils.legacy.supabase_manager_v2 import SupabaseManagerV2
+from utils.supabase_manager_unified import UnifiedSupabaseManager
 
 # 로깅 설정
 logging.basicConfig(level=logging.INFO)
@@ -42,7 +42,7 @@ class HankyungPoliticsCrawler:
         self.session.headers.update(HEADERS)
         
         # Supabase 매니저 초기화
-        self.supabase_manager = SupabaseManagerV2()
+        self.supabase_manager = UnifiedSupabaseManager()
         
         # 성능 최적화 설정
         self.adaptive_delay = 0.3

@@ -20,7 +20,7 @@ from datetime import datetime
 import re
 from urllib.parse import urljoin
 import logging
-from supabase_manager_v2 import SupabaseManagerV2
+from utils.supabase_manager_unified import UnifiedSupabaseManager
 from playwright.async_api import async_playwright
 
 logging.basicConfig(level=logging.INFO)
@@ -29,7 +29,7 @@ logger = logging.getLogger(__name__)
 class MBCPoliticsCrawler:
     def __init__(self):
         self.console = Console()
-        self.supabase = SupabaseManagerV2()
+        self.supabase = UnifiedSupabaseManager()
         self.media_id = 11  # MBC
         self.issue_id = 1  # 기본 이슈 ID
         self.base_url = "https://imnews.imbc.com"

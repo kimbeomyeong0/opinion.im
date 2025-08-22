@@ -15,7 +15,7 @@ from datetime import datetime
 import re
 from urllib.parse import urljoin, urlparse
 import logging
-from supabase_manager_v2 import SupabaseManagerV2
+from utils.supabase_manager_unified import UnifiedSupabaseManager
 import json
 
 # 로깅 설정
@@ -32,7 +32,7 @@ class JoongangPoliticsCrawler:
         
         # Supabase 매니저 초기화
         try:
-            self.supabase_manager = SupabaseManagerV2()
+            self.supabase_manager = UnifiedSupabaseManager()
             self.console.print("[green]Supabase 클라이언트 초기화 성공[/green]")
         except Exception as e:
             self.console.print(f"[red]Supabase 초기화 실패: {str(e)}[/red]")

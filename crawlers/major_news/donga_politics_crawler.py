@@ -15,7 +15,7 @@ from datetime import datetime
 import re
 from urllib.parse import urljoin, urlparse
 import logging
-from supabase_manager_v2 import SupabaseManagerV2
+from utils.supabase_manager_unified import UnifiedSupabaseManager
 import json
 
 # 로깅 설정
@@ -28,7 +28,7 @@ class DongaPoliticsCrawler:
         self.politics_url = "https://www.donga.com/news/Politics"
         self.max_articles = max_articles
         self.console = Console()
-        self.supabase_manager = SupabaseManagerV2()
+        self.supabase_manager = UnifiedSupabaseManager()
         
         # 동아일보는 우파 언론사
         self.media_name = "동아일보"

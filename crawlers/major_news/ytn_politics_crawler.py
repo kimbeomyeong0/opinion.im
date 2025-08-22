@@ -25,7 +25,7 @@ from rich.table import Table
 import sys
 import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-from utils.legacy.supabase_manager_v2 import SupabaseManagerV2
+from utils.supabase_manager_unified import UnifiedSupabaseManager
 
 console = Console()
 
@@ -54,7 +54,7 @@ class YTNPoliticsCrawler:
         self.seen_urls = set()
         
         # Supabase 연동
-        self.supabase_manager = SupabaseManagerV2()
+        self.supabase_manager = UnifiedSupabaseManager()
         self.media_name = "YTN"
         self.media_bias = "Center"
         
