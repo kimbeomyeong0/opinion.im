@@ -14,6 +14,10 @@ from bs4 import BeautifulSoup
 from urllib.parse import urljoin
 from utils.supabase_manager_unified import UnifiedSupabaseManager
 import re
+import sys
+import os
+sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+from utils.common.html_parser import HTMLParserUtils
 
 class OhMyNewsPoliticsCrawler:
     def __init__(self):
@@ -95,30 +99,8 @@ class OhMyNewsPoliticsCrawler:
             if content_elem:
                 content = content_elem.get_text(strip=True)
         
-        # 날짜 추출 - 오마이뉴스는 25.08.20 형식
-        publish_date = None
-        date_patterns = [
-            r'(\d{2}\.\d{2}\.\d{2})',  # 25.08.20 형식 우선
-            r'(\d{4}\.\d{2}\.\d{2})',
-            r'(\d{4}-\d{2}-\d{2})'
-        ]
-        
-        for pattern in date_patterns:
-            date_match = re.search(pattern, html_content)
-            if date_match:
-                date_str = date_match.group(1)
-                
-                # 25.08.20 형식을 2025-08-20 형식으로 변환
-                if re.match(r'\d{2}\.\d{2}\.\d{2}', date_str):
-                    parts = date_str.split('.')
-                    if len(parts) == 3:
-                        year = '20' + parts[0]  # 25 -> 2025
-                        month = parts[1]
-                        day = parts[2]
-                        publish_date = f"{year}-{month}-{day}"
-                else:
-                    publish_date = date_str
-                break
+        # 날짜 추출 - 공통 유틸리티 사용
+        publish_date = HTMLParserUtils.parse_date(html_content)
         
         # 불필요한 요소들 제거 - 오마이뉴스 특화
         unwanted_patterns = [

@@ -15,7 +15,7 @@ from datetime import datetime, timedelta
 from typing import List, Dict, Optional
 from urllib.parse import urljoin
 
-import httpx
+# httpx는 공통 유틸리티에서 사용
 from bs4 import BeautifulSoup
 from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TimeElapsedColumn
@@ -26,6 +26,8 @@ import sys
 import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 from utils.supabase_manager_unified import UnifiedSupabaseManager
+from utils.common.http_client import make_request
+from utils.common.html_parser import HTMLParserUtils
 
 console = Console()
 
@@ -74,30 +76,8 @@ class YTNPoliticsCrawler:
         }
 
     async def _make_request(self, url: str, params: Optional[Dict] = None) -> Optional[str]:
-        """HTTP GET 요청 수행"""
-        try:
-            async with httpx.AsyncClient(
-                headers=self.headers,
-                timeout=self.timeout,
-                follow_redirects=True
-            ) as client:
-                if params:
-                    response = await client.get(url, params=params)
-                else:
-                    response = await client.get(url)
-                
-                response.raise_for_status()
-                return response.text
-                
-        except httpx.HTTPStatusError as e:
-            console.print(f"❌ HTTP 오류: {e.response.status_code} - {url}")
-            return None
-        except httpx.TimeoutException:
-            console.print(f"⏰ 타임아웃: {url}")
-            return None
-        except Exception as e:
-            console.print(f"❌ 요청 오류: {str(e)} - {url}")
-            return None
+        """HTTP GET 요청 수행 - 공통 유틸리티 사용"""
+        return await make_request(url, "httpx", "GET", params=params, headers=self.headers, timeout=self.timeout)
 
     async def _extract_article_content(self, url: str) -> str:
         """기사 상세 페이지에서 본문 추출"""
@@ -131,38 +111,28 @@ class YTNPoliticsCrawler:
             return ""
 
     async def _make_post_request(self, url: str, data: Dict) -> Optional[Dict]:
-        """HTTP POST 요청 수행 (AJAX용)"""
-        try:
-            async with httpx.AsyncClient(
-                headers=self.headers,
-                timeout=self.timeout,
-                follow_redirects=True
-            ) as client:
-                response = await client.post(url, data=data)
-                response.raise_for_status()
-                
-                if response.text:
-                    return json.loads(response.text)
+        """HTTP POST 요청 수행 (AJAX용) - 공통 유틸리티 사용"""
+        response_text = await make_request(url, "httpx", "POST", data=data, headers=self.headers, timeout=self.timeout)
+        if response_text:
+            try:
+                return json.loads(response_text)
+            except json.JSONDecodeError as e:
+                console.print(f"❌ JSON 파싱 오류: {str(e)} - {url}")
                 return None
-                
-        except httpx.HTTPStatusError as e:
-            console.print(f"❌ HTTP 오류: {e.response.status_code} - {url}")
-            return None
-        except httpx.TimeoutException:
-            console.print(f"⏰ 타임아웃: {url}")
-            return None
-        except json.JSONDecodeError as e:
-            console.print(f"❌ JSON 파싱 오류: {str(e)} - {url}")
-            return None
-        except Exception as e:
-            console.print(f"❌ 요청 오류: {str(e)} - {url}")
-            return None
+        return None
 
     def _parse_date(self, date_str: str) -> Optional[str]:
-        """날짜 문자열을 YYYY-MM-DD 형식으로 변환"""
-        try:
-            if not date_str or date_str.strip() == "":
-                return None
+        """날짜 문자열을 YYYY-MM-DD 형식으로 변환 - 공통 유틸리티 사용"""
+        if not date_str or date_str.strip() == "":
+            return None
+        
+        # YTN 날짜 형식: "2025.08.22. 14:21" -> "2025.08.22"
+        date_str_clean = date_str.strip().split(".")[0:3]
+        if len(date_str_clean) == 3:
+            date_str_clean = ".".join(date_str_clean)
+            return HTMLParserUtils.parse_date(date_str_clean)
+        
+        return None
                 
             # YTN 날짜 형식: "2025.08.22. 14:21"
             if re.match(r'^\d{4}\.\d{2}\.\d{2}\.\s+\d{2}:\d{2}$', date_str.strip()):
@@ -176,18 +146,8 @@ class YTNPoliticsCrawler:
             return None
 
     def _clean_title(self, title: str) -> str:
-        """제목 정리"""
-        if not title:
-            return ""
-        
-        # HTML 태그 제거
-        title = re.sub(r'<[^>]+>', '', title)
-        
-        # 특수문자 정리
-        title = re.sub(r'\s+', ' ', title)
-        title = title.strip()
-        
-        return title
+        """제목 정리 - 공통 유틸리티 사용"""
+        return HTMLParserUtils.clean_title(title)
 
     def _parse_articles_from_html(self, html: str) -> List[Dict]:
         """HTML에서 기사 목록 파싱"""
