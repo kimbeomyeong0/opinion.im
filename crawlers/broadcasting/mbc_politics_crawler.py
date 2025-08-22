@@ -21,6 +21,10 @@ import re
 from urllib.parse import urljoin
 import logging
 from utils.supabase_manager_unified import UnifiedSupabaseManager
+import sys
+import os
+sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+from utils.common.html_parser import HTMLParserUtils
 from playwright.async_api import async_playwright
 
 logging.basicConfig(level=logging.INFO)

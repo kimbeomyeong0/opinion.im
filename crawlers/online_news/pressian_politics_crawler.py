@@ -16,6 +16,10 @@ from rich.table import Table
 from rich import box
 import re
 from utils.supabase_manager_unified import UnifiedSupabaseManager
+import sys
+import os
+sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+from utils.common.html_parser import HTMLParserUtils
 
 # 로깅 설정
 logging.basicConfig(level=logging.INFO)

@@ -29,6 +29,7 @@ from contextlib import asynccontextmanager
 
 sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..', 'utils'))
 from utils.supabase_manager_unified import UnifiedSupabaseManager
+from utils.common.html_parser import HTMLParserUtils
 
 # 로깅 설정
 logging.basicConfig(level=logging.INFO)
