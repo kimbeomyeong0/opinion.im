@@ -1,0 +1,10 @@
+aiohttp==3.9.1
+beautifulsoup4==4.12.2
+rich==13.7.0
+lxml==4.9.3
+supabase==2.3.4
+python-dotenv==1.0.0
+```
+
+```
+

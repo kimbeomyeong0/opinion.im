@@ -1,0 +1,1 @@
+<span class="upDate | flex flex--align-items-end ">업데이트&nbsp;2025.08.20. 16:18<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 20 20"><path fill="#999" d="M14.285 6.667L15.463 7.845 10.232 13.076 5 7.845 6.178 6.667 10.232 10.719z"></path></svg></span>

@@ -1,0 +1,429 @@
+import asyncio
+import aiohttp
+import time
+from bs4 import BeautifulSoup
+from typing import List, Dict, Optional
+from rich.console import Console
+from rich.table import Table
+from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TimeElapsedColumn
+from rich.panel import Panel
+from rich.text import Text
+from rich.live import Live
+from rich.layout import Layout
+from rich.columns import Columns
+from datetime import datetime
+import re
+from urllib.parse import urljoin, urlparse
+import logging
+from supabase_manager_v2 import SupabaseManagerV2
+import json
+
+# 로깅 설정
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+class JoongangPoliticsCrawler:
+    def __init__(self, max_articles: int = 100):
+        self.base_url = "https://www.joongang.co.kr"
+        self.politics_url = "https://www.joongang.co.kr/politics"
+        self.max_articles = max_articles
+        self.console = Console()
+        self.delay = 0.1
+        
+        # Supabase 매니저 초기화
+        try:
+            self.supabase_manager = SupabaseManagerV2()
+            self.console.print("[green]Supabase 클라이언트 초기화 성공[/green]")
+        except Exception as e:
+            self.console.print(f"[red]Supabase 초기화 실패: {str(e)}[/red]")
+            raise
+    
+    async def __aenter__(self):
+        self.session = aiohttp.ClientSession(
+            headers={
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+            }
+        )
+        return self
+    
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        await self.session.close()
+    
+    async def get_politics_article_links(self) -> List[str]:
+        """정치 섹션에서 기사 링크 수집 (페이지네이션 방식)"""
+        all_article_links = []
+        
+        # 페이지네이션을 통한 기사 수집
+        max_pages = 10  # 최대 10페이지까지 시도
+        articles_per_page = 25  # 중앙일보는 페이지당 약 25개 기사
+        
+        for page in range(1, max_pages + 1):
+            page_url = f"{self.politics_url}?page={page}"
+            self.console.print(f"[cyan]🔍 {page}페이지 크롤링: {page_url}[/cyan]")
+            
+            try:
+                page_links = await self._get_links_from_page(page_url)
+                all_article_links.extend(page_links)
+                self.console.print(f"[green]  - {page}페이지에서 {len(page_links)}개 링크 발견[/green]")
+                
+                # 충분한 기사를 수집했으면 중단
+                if len(all_article_links) >= self.max_articles:
+                    break
+                    
+                await asyncio.sleep(self.delay)
+                
+            except Exception as e:
+                self.console.print(f"[red]  - {page}페이지 크롤링 실패: {str(e)}[/red]")
+                logger.error(f"{page}페이지 크롤링 실패: {str(e)}")
+                continue
+        
+        # 중복 제거 및 정리
+        unique_links = list(set(all_article_links))
+        valid_links = [link for link in unique_links if self._is_valid_article_url(link)]
+        valid_links.sort(reverse=True)
+        
+        self.console.print(f"[bold green]총 {len(valid_links)}개 정치 기사 링크 발견[/bold green]")
+        return valid_links[:self.max_articles]
+    
+    async def _get_links_from_page(self, url: str) -> List[str]:
+        """특정 페이지에서 기사 링크 수집"""
+        try:
+            async with self.session.get(url) as response:
+                if response.status != 200:
+                    return []
+                
+                html = await response.text()
+                soup = BeautifulSoup(html, 'html.parser')
+                
+                article_links = []
+                
+                # story_list 안의 card에서 기사 링크 추출
+                cards = soup.select('.story_list .card')
+                for card in cards:
+                    headline_link = card.select_one('.headline a')
+                    if headline_link:
+                        href = headline_link.get('href')
+                        if href:
+                            if href.startswith('/'):
+                                full_url = urljoin(self.base_url, href)
+                            else:
+                                full_url = href
+                            if full_url not in article_links and self._is_valid_article_url(full_url):
+                                article_links.append(full_url)
+                
+                return article_links
+                
+        except Exception as e:
+            logger.error(f"페이지 {url} 링크 수집 실패: {str(e)}")
+            return []
+    
+    def _is_valid_article_url(self, url: str) -> bool:
+        """유효한 기사 URL인지 확인"""
+        if not url:
+            return False
+        
+        # 중앙일보 기사 URL 패턴 확인
+        if '/article/' not in url:
+            return False
+        
+        # URL 길이 확인 (너무 짧으면 제외)
+        if len(url) < 30:
+            return False
+        
+        return True
+    
+    async def crawl_article(self, url: str) -> Optional[Dict]:
+        """개별 기사 크롤링"""
+        try:
+            async with self.session.get(url) as response:
+                if response.status != 200:
+                    return None
+                
+                html = await response.text()
+                soup = BeautifulSoup(html, 'html.parser')
+                
+                # 기사 정보 추출
+                title = self._extract_title(soup)
+                content = self._extract_content(soup)
+                published_time = self._extract_published_time(soup)
+                
+                if not title or not content:
+                    return None
+                
+                return {
+                    'title': title,
+                    'url': url,
+                    'content': content,
+                    'published_at': published_time
+                }
+                
+        except Exception as e:
+            logger.error(f"기사 {url} 크롤링 실패: {str(e)}")
+            return None
+    
+    def _extract_title(self, soup: BeautifulSoup) -> Optional[str]:
+        """기사 제목 추출"""
+        try:
+            # 중앙일보 제목 선택자
+            title_selectors = [
+                'h1.headline',
+                '.headline h1',
+                'h1.title',
+                '.title h1',
+                'h1'
+            ]
+            
+            for selector in title_selectors:
+                title_elem = soup.select_one(selector)
+                if title_elem:
+                    title = title_elem.get_text(strip=True)
+                    if title and len(title) > 5:
+                        return title
+            
+            return None
+            
+        except Exception as e:
+            logger.error(f"제목 추출 실패: {str(e)}")
+            return None
+    
+    def _extract_content(self, soup: BeautifulSoup) -> Optional[str]:
+        """기사 본문 추출"""
+        try:
+            # 중앙일보 본문 선택자
+            content_selectors = [
+                '.article_body',
+                '.article-content',
+                '.content',
+                '.body',
+                'article',
+                '.article'
+            ]
+            
+            for selector in content_selectors:
+                content_elem = soup.select_one(selector)
+                if content_elem:
+                    # 불필요한 요소 제거
+                    for elem in content_elem.select('script, style, .ad, .advertisement'):
+                        elem.decompose()
+                    
+                    content = content_elem.get_text(strip=True, separator=' ')
+                    if content and len(content) > 100:
+                        return content
+            
+            return None
+            
+        except Exception as e:
+            logger.error(f"본문 추출 실패: {str(e)}")
+            return None
+    
+    def _extract_published_time(self, soup: BeautifulSoup) -> Optional[datetime]:
+        """기사 발행 시간 추출"""
+        try:
+            # 중앙일보 시간 선택자
+            time_selectors = [
+                'meta[name="article:published_time"]',
+                '.date',
+                '.published_date',
+                '.article_date',
+                '.time'
+            ]
+            
+            for selector in time_selectors:
+                if selector.startswith('meta'):
+                    time_elem = soup.select_one(selector)
+                    if time_elem:
+                        time_str = time_elem.get('content')
+                        if time_str:
+                            try:
+                                # ISO 8601 형식 파싱
+                                return datetime.fromisoformat(time_str.replace('Z', '+00:00'))
+                            except:
+                                pass
+                else:
+                    time_elem = soup.select_one(selector)
+                    if time_elem:
+                        time_str = time_elem.get_text(strip=True)
+                        if time_str:
+                            # 중앙일보 날짜 형식: "2025.08.20 22:48"
+                            try:
+                                return datetime.strptime(time_str, '%Y.%m.%d %H:%M')
+                            except:
+                                pass
+            
+            return None
+            
+        except Exception as e:
+            logger.error(f"발행 시간 추출 실패: {str(e)}")
+            return None
+    
+    async def save_to_database(self, articles: List[Dict]) -> None:
+        """데이터베이스에 기사 저장"""
+        if not articles:
+            return
+        
+        self.console.print("\n데이터베이스에 저장 중...")
+        
+        # 중앙일보 미디어 아웃렛 정보
+        media_name = "중앙일보"
+        
+        # 이슈 생성 또는 가져오기
+        # 크롤링 단계에서는 issue_id를 설정하지 않음 (클러스터링 후 설정)
+        # 임시 이슈 ID 6 사용 (데이터베이스 제약조건 준수)
+        issue = {'id': 6}
+        
+        # 미디어 아웃렛 정보 가져오기
+        media_outlet = self.supabase_manager.get_media_outlet(media_name)
+        if not media_outlet:
+            media_outlet = self.supabase_manager.create_media_outlet(media_name, "center")
+        
+        # 기사 저장
+        saved_count = 0
+        for article in articles:
+            try:
+                # 기존 기사 확인
+                existing = self.supabase_manager.client.table('articles').select('id').eq('url', article['url']).execute()
+                
+                if existing.data:
+                    # 기존 기사 업데이트
+                    self.supabase_manager.client.table('articles').update({
+                        'title': article['title'],
+                        'content': article['content'],
+                        'published_at': article['published_at'].isoformat() if article['published_at'] else None
+                    }).eq('url', article['url']).execute()
+                    
+                    self.console.print(f"[yellow]기존 기사 업데이트: {article['title'][:50]}...[/yellow]")
+                else:
+                    # 새 기사 삽입
+                    self.supabase_manager.insert_article({
+                        'issue_id': issue['id'],
+                        'media_id': media_outlet['id'],
+                        'title': article['title'],
+                        'url': article['url'],
+                        'content': article['content'],
+                        'bias': media_outlet['bias'],
+                        'published_at': article['published_at']
+                    })
+                    
+                    saved_count += 1
+                    self.console.print(f"[green]새 기사 삽입: {article['title'][:50]}...[/green]")
+                
+            except Exception as e:
+                logger.error(f"기사 저장 실패: {str(e)}")
+                continue
+        
+        self.console.print(f"[bold green]✅ {saved_count}개 기사 저장 성공![/bold green]")
+        
+        # 이슈 편향성 업데이트
+        try:
+            self.supabase_manager.update_issue_bias(issue['id'])
+            self.console.print(f"[green]이슈 편향성 업데이트 성공: {issue['id']}[/green]")
+        except Exception as e:
+            logger.error(f"이슈 편향성 업데이트 실패: {str(e)}")
+    
+    def display_results(self, articles: List[Dict], elapsed_time: float) -> None:
+        """크롤링 결과 표시"""
+        if not articles:
+            self.console.print("[red]크롤링된 기사가 없습니다.[/red]")
+            return
+        
+        # 결과 요약
+        success_count = len(articles)
+        failed_count = self.max_articles - success_count
+        speed = success_count / elapsed_time if elapsed_time > 0 else 0
+        
+        summary_panel = Panel(
+            f"⏱️  크롤링 시간: {elapsed_time:.2f}초\n"
+            f"📰 발견된 기사: {self.max_articles}개\n"
+            f"✅ 성공: {success_count}개\n"
+            f"❌ 실패: {failed_count}개\n"
+            f"🚀 속도: {speed:.1f} 기사/초",
+            title="📊 크롤링 결과",
+            border_style="blue"
+        )
+        
+        self.console.print(summary_panel)
+        
+        # 기사 목록 테이블
+        table = Table(title="📰 크롤링된 기사 목록")
+        table.add_column("번호", style="cyan", no_wrap=True)
+        table.add_column("제목", style="white")
+        table.add_column("길이", style="green")
+        table.add_column("시간", style="yellow")
+        
+        for i, article in enumerate(articles[:20], 1):  # 처음 20개만 표시
+            title = article['title'][:50] + "..." if len(article['title']) > 50 else article['title']
+            content_length = len(article['content']) if article['content'] else 0
+            published_time = article['published_at'].strftime('%Y-%m-%d\n%H:%M') if article['published_at'] else "N/A"
+            
+            table.add_row(
+                str(i),
+                title,
+                f"{content_length:,}자",
+                published_time
+            )
+        
+        if len(articles) > 20:
+            table.add_row("...", f"및 {len(articles) - 20}개 더", "", "")
+        
+        self.console.print(table)
+    
+    async def run(self) -> None:
+        """크롤러 실행"""
+        start_time = time.time()
+        
+        # 제목 출력
+        title_panel = Panel(
+            "중앙일보 정치 기사 크롤러\n"
+            "🚀 최신 정치 기사 100개를 빠르게 수집합니다",
+            title="중앙일보 정치 기사 크롤러",
+            border_style="green"
+        )
+        self.console.print(title_panel)
+        
+        # 1단계: 기사 링크 수집
+        self.console.print("\n🔍 정치 기사 링크 수집 중...")
+        article_links = await self.get_politics_article_links()
+        
+        if not article_links:
+            self.console.print("[red]수집된 기사 링크가 없습니다.[/red]")
+            return
+        
+        # 2단계: 기사 크롤링
+        self.console.print(f"\n📰 {len(article_links)}개 기사 크롤링 시작...")
+        
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            BarColumn(),
+            TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
+            TimeElapsedColumn(),
+            console=self.console
+        ) as progress:
+            task = progress.add_task("기사 크롤링 중...", total=len(article_links))
+            
+            articles = []
+            for link in article_links:
+                article = await self.crawl_article(link)
+                if article:
+                    articles.append(article)
+                
+                progress.advance(task)
+                await asyncio.sleep(self.delay)
+        
+        # 3단계: 결과 표시
+        elapsed_time = time.time() - start_time
+        self.display_results(articles, elapsed_time)
+        
+        # 4단계: 데이터베이스 저장
+        if articles:
+            await self.save_to_database(articles)
+        
+        self.console.print("\n🎉 크롤링 완료!")
+
+async def main():
+    """메인 함수"""
+    async with JoongangPoliticsCrawler(max_articles=100) as crawler:
+        await crawler.run()
+
+if __name__ == "__main__":
+    asyncio.run(main())
