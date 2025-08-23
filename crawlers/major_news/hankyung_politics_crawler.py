@@ -302,14 +302,16 @@ class HankyungPoliticsCrawler:
             # 실패 시 딜레이 증가
             self.adaptive_delay = min(self.adaptive_delay * 1.2, self.max_delay)
     
-    def save_to_supabase(self):
+    def save_to_supabase(self, articles: List[Dict] = None):
         """결과를 Supabase에 저장"""
+        if articles is None:
+            articles = self.articles
         try:
             if not self.supabase_manager.is_connected():
                 print("❌ Supabase에 연결되지 않았습니다.")
                 return
             
-            print(f"💾 Supabase에 {len(self.articles)}개 기사 저장 중...")
+            print(f"💾 Supabase에 {len(articles)}개 기사 저장 중...")
             
             # media_outlet 생성 또는 조회
             media_outlet = self.supabase_manager.get_media_outlet(self.media_name)
@@ -386,6 +388,18 @@ class HankyungPoliticsCrawler:
         else:
             print(f"⚠️  목표 기사 수({self.max_articles}개) 미달성: {len(self.articles)}개")
     
+    async def collect_all_articles(self) -> List[Dict]:
+        """모든 기사 수집 (비동기 인터페이스)"""
+        try:
+            return self.crawl_hankyung()
+        except KeyboardInterrupt:
+            print("\n⚠️  사용자에 의해 중단되었습니다.")
+            return self.articles
+        except Exception as e:
+            print(f"\n❌ 크롤러 실행 중 오류 발생: {str(e)}")
+            logger.error(f"크롤러 오류: {str(e)}", exc_info=True)
+            return self.articles
+
     def run(self):
         """크롤러 실행"""
         try:

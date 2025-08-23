@@ -18,7 +18,7 @@ from rich.console import Console
 from rich.table import Table
 
 # 프로젝트 내부 모듈
-from utils.supabase_manager_unified import UnifiedSupabaseManager
+from utils.supabase_manager_unified import SupabaseManager
 from utils.common import make_request
 
 console = Console()
@@ -61,7 +61,7 @@ class ChosunPoliticsCollector:
             self.date_range.append(date)
         
         # Supabase 매니저 초기화
-        self.supabase_manager = UnifiedSupabaseManager()
+        self.supabase_manager = SupabaseManager()
         
         # Playwright 관련
         self._playwright = None
@@ -394,15 +394,12 @@ class ChosunPoliticsCollector:
                             continue
                 
                 content = await page.evaluate('''() => {
-                    // 우선순위 1: article-body__content-text 클래스가 있는 p 태그들
                     let paragraphs = document.querySelectorAll('p.article-body__content.article-body__content-text');
                     
-                    // 우선순위 2: article-body__content 클래스가 있는 p 태그들
                     if (paragraphs.length === 0) {
                         paragraphs = document.querySelectorAll('p.article-body__content');
                     }
                     
-                    // 우선순위 3: article-body 영역 내의 모든 p 태그들
                     if (paragraphs.length === 0) {
                         const articleBody = document.querySelector('section.article-body');
                         if (articleBody) {
@@ -410,28 +407,13 @@ class ChosunPoliticsCollector:
                         }
                     }
                     
-                    // 우선순위 4: 본문 관련 클래스가 있는 p 태그들
                     if (paragraphs.length === 0) {
-                        paragraphs = document.querySelectorAll('p[class*="article"], p[class*="content"], p[class*="body"]');
-                    }
-                    
-                    // 우선순위 5: 일반적인 본문 p 태그들
-                    if (paragraphs.length === 0) {
-                        paragraphs = document.querySelectorAll('article p, .content p, .article p, main p');
-                    }
-                    
-                    // 우선순위 6: div 태그들 중 텍스트가 있는 것들
-                    if (paragraphs.length === 0) {
-                        const contentDivs = document.querySelectorAll('div');
-                        paragraphs = Array.from(contentDivs).filter(div => {
-                            const text = div.textContent.trim();
-                            return text.length > 20 && !div.querySelector('p, h1, h2, h3, h4, h5, h6');
-                        });
+                        paragraphs = document.querySelectorAll('article p, .content p, .article p');
                     }
                     
                     const textContent = Array.from(paragraphs)
                         .map(p => p.textContent.trim())
-                        .filter(text => text.length > 10 && !text.includes('광고') && !text.includes('©'))
+                        .filter(text => text.length > 10)
                         .join('\\n\\n');
                     
                     return textContent;
@@ -457,117 +439,27 @@ class ChosunPoliticsCollector:
             
             soup = BeautifulSoup(html, 'html.parser')
             
-            # 1. JavaScript에서 본문 데이터 추출 시도
-            console.print("🔍 JavaScript에서 본문 데이터 추출 시도...")
-            scripts = soup.find_all('script')
-            
-            for script in scripts:
-                if not script.string:
-                    continue
-                
-                script_content = script.string
-                
-                # content_elements가 포함된 JSON 데이터 찾기
-                if 'content_elements' in script_content:
-                    try:
-                        # 정규식으로 content_elements 부분만 추출
-                        content_match = re.search(r'"content_elements"\s*:\s*\[(.*?)\]', script_content, re.DOTALL)
-                        if content_match:
-                            content_part = content_match.group(1)
-                            
-                            # 개별 content 요소들에서 본문 추출
-                            content_items = re.findall(r'\{[^}]*"content"[^}]*\}', content_part)
-                            
-                            for item in content_items:
-                                # content 값 추출
-                                content_value_match = re.search(r'"content"\s*:\s*"([^"]*)"', item)
-                                if content_value_match:
-                                    content_value = content_value_match.group(1)
-                                    if content_value and len(content_value) > 100:
-                                        console.print(f"✅ content에서 본문 추출 성공: {len(content_value)}자")
-                                        return content_value.strip()
-                            
-                            # description.basic에서 본문 추출
-                            desc_matches = re.findall(r'"description"\s*:\s*\{[^}]*\}', content_part)
-                            
-                            for desc in desc_matches:
-                                basic_match = re.search(r'"basic"\s*:\s*"([^"]*)"', desc)
-                                if basic_match:
-                                    basic_value = basic_match.group(1)
-                                    if basic_value and len(basic_value) > 100:
-                                        console.print(f"✅ description.basic에서 본문 추출 성공: {len(basic_value)}자")
-                                        return basic_value.strip()
-                        
-                        # 전체 script에서 description.basic 찾기
-                        desc_matches = re.findall(r'"description"\s*:\s*\{[^}]*\}', script_content)
-                        
-                        for desc in desc_matches:
-                            basic_match = re.search(r'"basic"\s*:\s*"([^"]*)"', desc)
-                            if basic_match:
-                                basic_value = basic_match.group(1)
-                                if basic_value and len(basic_value) > 100:
-                                    console.print(f"✅ 전체 script에서 description.basic 본문 추출 성공: {len(basic_value)}자")
-                                    return basic_value.strip()
-                        
-                        # 전체 script에서 content 필드 찾기
-                        content_matches = re.findall(r'"content"\s*:\s*"([^"]*)"', script_content)
-                        
-                        for content_value in content_matches:
-                            if content_value and len(content_value) > 100:
-                                console.print(f"✅ 전체 script에서 content 본문 추출 성공: {len(content_value)}자")
-                                return content_value.strip()
-                                
-                    except Exception as e:
-                        console.print(f"⚠️ 정규식 본문 추출 오류: {str(e)}")
-                        continue
-            
-            # 2. 기존 HTML 파싱 방식 (fallback)
-            console.print("📖 HTML 파싱 방식으로 본문 추출 시도...")
             content_elem = (
                 soup.find('section', class_='article-body') or
                 soup.find('section', {'itemprop': 'articleBody'}) or
                 soup.find('article', class_='article-body') or
-                soup.find('div', class_='article-body') or
-                soup.find('div', class_='content') or
-                soup.find('div', class_='article-content')
+                soup.find('div', class_='article-body')
             )
             
             if content_elem:
-                # 우선순위 1: article-body__content 클래스가 있는 p 태그들
                 p_tags = content_elem.find_all('p', class_='article-body__content')
                 
-                # 우선순위 2: article-body__content-text 클래스가 있는 p 태그들
-                if not p_tags:
-                    p_tags = content_elem.find_all('p', class_='article-body__content-text')
-                
-                # 우선순위 3: 일반 p 태그들 (본문 영역 내)
                 if not p_tags:
                     p_tags = content_elem.find_all('p')
                 
-                # 우선순위 4: div 태그들 중 텍스트가 있는 것들
-                if not p_tags:
-                    div_tags = content_elem.find_all('div')
-                    p_tags = [div for div in div_tags if div.get_text(strip=True) and len(div.get_text(strip=True)) > 20]
-                
                 if p_tags:
-                    # 텍스트 추출 및 정리
-                    content_parts = []
-                    for p in p_tags:
-                        text = p.get_text(strip=True)
-                        if text and len(text) > 10:  # 10자 이상만 포함
-                            content_parts.append(text)
-                    
-                    content = '\n\n'.join(content_parts)
+                    content = '\n'.join(p.get_text(strip=True) for p in p_tags if p.get_text(strip=True))
                     content = re.sub(r'\n\s*\n', '\n\n', content)
-                    content = re.sub(r'\s+', ' ', content)  # 연속된 공백 정리
-                    
                     return content.strip()
             
-            console.print("❌ HTML에서 본문을 찾을 수 없습니다")
             return ""
             
         except Exception as e:
-            console.print(f"❌ HTML 본문 추출 오류: {str(e)}")
             return ""
 
     def _add_article_to_collection(self, article: Dict) -> bool:
@@ -648,59 +540,6 @@ class ChosunPoliticsCollector:
             
         except Exception as e:
             return []
-
-    def _extract_content_from_json(self, data: Dict) -> str:
-        """JSON 데이터에서 본문 추출"""
-        try:
-            # 1. content_elements에서 본문 찾기
-            content_elements = data.get('content_elements', [])
-            
-            if content_elements:
-                # content_elements에서 본문 관련 필드들 확인
-                for element in content_elements:
-                    # content 필드 확인
-                    if 'content' in element:
-                        content_value = element['content']
-                        if isinstance(content_value, str) and len(content_value) > 100:
-                            return content_value.strip()
-                    
-                    # description 필드 확인 (가장 중요한 본문 소스)
-                    if 'description' in element:
-                        desc = element['description']
-                        if isinstance(desc, dict) and 'basic' in desc:
-                            basic_text = desc['basic']
-                            if isinstance(basic_text, str) and len(basic_text) > 100:
-                                return basic_text.strip()
-            
-            # 2. 최상위 레벨에서 본문 찾기
-            # description 필드 확인
-            if 'description' in data:
-                desc = data['description']
-                if isinstance(desc, dict) and 'basic' in desc:
-                    basic_text = desc['basic']
-                    if isinstance(basic_text, str) and len(basic_text) > 100:
-                        return basic_text.strip()
-            
-            # 3. 다른 가능한 본문 필드들
-            content_fields = ['content', 'body', 'text', 'article_body', 'full_text']
-            for field in content_fields:
-                if field in data:
-                    field_value = data[field]
-                    
-                    if isinstance(field_value, str) and len(field_value) > 100:
-                        return field_value.strip()
-                    
-                    elif isinstance(field_value, dict):
-                        if 'basic' in field_value:
-                            basic_text = field_value['basic']
-                            if isinstance(basic_text, str) and len(basic_text) > 100:
-                                return basic_text.strip()
-            
-            return ""
-            
-        except Exception as e:
-            console.print(f"⚠️ JSON 본문 추출 오류: {str(e)}")
-            return ""
 
     async def _cleanup_playwright(self):
         """Playwright 리소스 정리"""
@@ -897,3 +736,4 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+

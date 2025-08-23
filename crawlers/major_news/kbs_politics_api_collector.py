@@ -397,6 +397,20 @@ class KBSPoliticsAPICollector:
         print("\n🎉 KBS 정치 뉴스 API 수집 완료!")
         print("💾 Supabase에 저장 완료!")
 
+    async def collect_all_articles(self) -> List[Dict]:
+        """모든 기사 수집 (표준 인터페이스)"""
+        try:
+            result = await self.collect_all_news()
+            if hasattr(self, 'articles') and self.articles:
+                return self.articles
+            elif result:
+                return result if isinstance(result, list) else []
+            else:
+                return []
+        except Exception as e:
+            print(f"❌ 기사 수집 실패: {str(e)}")
+            return getattr(self, 'articles', [])
+
 async def main():
     """메인 실행 함수"""
     try:

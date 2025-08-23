@@ -349,9 +349,24 @@ class MBCPoliticsCrawler:
             self.console.print(f"[red]크롤러 실행 중 오류 발생: {str(e)}[/red]")
             logger.error(f"크롤러 실행 오류: {str(e)}")
 
+
+    async def collect_all_articles(self) -> List[Dict]:
+        """모든 기사 수집 (표준 인터페이스)"""
+        try:
+            result = await self.run()
+            if hasattr(self, 'articles') and self.articles:
+                return self.articles
+            elif result:
+                return result if isinstance(result, list) else []
+            else:
+                return []
+        except Exception as e:
+            print(f"❌ 기사 수집 실패: {str(e)}")
+            return getattr(self, 'articles', [])
+
 async def main():
     async with MBCPoliticsCrawler() as crawler:
         await crawler.run()
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    asyncio.run(asyncio.run(main()))

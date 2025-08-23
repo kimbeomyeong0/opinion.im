@@ -323,4 +323,4 @@ async def main():
         print("❌ 수집된 기사가 없습니다.")
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    asyncio.run(asyncio.run(main()))

@@ -470,10 +470,49 @@ class DongaPoliticsCrawler:
             self.console.print(f"[red]크롤러 실행 중 오류 발생: {str(e)}[/red]")
             logger.error(f"크롤러 실행 중 오류: {str(e)}")
 
+
+    async def collect_all_articles(self) -> List[Dict]:
+        """모든 기사 수집 (표준 인터페이스)"""
+        try:
+            result = await self.crawl_articles()
+            if hasattr(self, 'articles') and self.articles:
+                return self.articles
+            elif result:
+                return result if isinstance(result, list) else []
+            else:
+                return []
+        except Exception as e:
+            print(f"❌ 기사 수집 실패: {str(e)}")
+            return getattr(self, 'articles', [])
+
+
+    async def save_to_supabase(self, articles: List[Dict]) -> Dict[str, int]:
+        """Supabase에 기사 저장"""
+        if not articles:
+            return {"success": 0, "failed": 0}
+        
+        success_count = 0
+        failed_count = 0
+        
+        try:
+            for article in articles:
+                if hasattr(self, 'supabase_manager') and self.supabase_manager:
+                    if self.supabase_manager.insert_article(article):
+                        success_count += 1
+                    else:
+                        failed_count += 1
+                else:
+                    failed_count += 1
+        except Exception as e:
+            print(f"❌ Supabase 저장 오류: {str(e)}")
+            failed_count = len(articles)
+        
+        return {"success": success_count, "failed": failed_count}
+
 async def main():
     """메인 함수"""
     crawler = DongaPoliticsCrawler(max_articles=100)
     await crawler.run()
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    asyncio.run(asyncio.run(main()))

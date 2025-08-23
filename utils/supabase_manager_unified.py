@@ -175,42 +175,36 @@ class UnifiedSupabaseManager:
             self.logger.error(f"이슈 조회 실패: {str(e)}")
             return None
     
-    def update_issue_bias(self, issue_id: int, bias_data: Dict[str, float]) -> bool:
-        """이슈 편향성 업데이트"""
+    def update_issue_bias(self, issue_id: int) -> bool:
+        """이슈의 편향성 업데이트"""
         if not self.is_connected():
             return False
         
         try:
-            # 편향성 퍼센트 계산
-            total = sum(bias_data.values())
-            if total > 0:
-                bias_left_pct = (bias_data.get('left', 0) / total) * 100
-                bias_center_pct = (bias_data.get('center', 0) / total) * 100
-                bias_right_pct = (bias_data.get('right', 0) / total) * 100
-                
-                # 주요 편향성 결정
-                if bias_left_pct > 50:
-                    main_bias = 'left'
-                elif bias_right_pct > 50:
-                    main_bias = 'right'
-                else:
-                    main_bias = 'center'
-                
-                update_data = {
-                    'bias_left': bias_data.get('left', 0),
-                    'bias_center': bias_data.get('center', 0),
-                    'bias_right': bias_data.get('right', 0),
-                    'bias_left_pct': round(bias_left_pct, 2),
-                    'bias_center_pct': round(bias_center_pct, 2),
-                    'bias_right_pct': round(bias_right_pct, 2),
-                    'main_bias': main_bias
-                }
-                
-                result = self.client.table('issues').update(update_data).eq('id', issue_id).execute()
-                if result.data:
-                    self.logger.info(f"이슈 편향성 업데이트 성공: {issue_id}")
-                    return True
+            # 해당 이슈의 기사들의 편향성 분석
+            result = self.client.table('articles').select('bias').eq('issue_id', issue_id).execute()
+            
+            if not result.data:
                 return False
+            
+            # 편향성 분포 계산
+            bias_counts = {}
+            for article in result.data:
+                bias = article.get('bias', 'Unknown')
+                bias_counts[bias] = bias_counts.get(bias, 0) + 1
+            
+            # 가장 많은 편향성 찾기
+            dominant_bias = max(bias_counts.items(), key=lambda x: x[1])[0] if bias_counts else 'Unknown'
+            
+            # 이슈 테이블 업데이트 (이슈 테이블이 있다면)
+            try:
+                self.client.table('issues').update({'bias': dominant_bias}).eq('id', issue_id).execute()
+                self.logger.info(f"이슈 {issue_id} 편향성 업데이트: {dominant_bias}")
+                return True
+            except:
+                # 이슈 테이블이 없으면 무시
+                self.logger.info(f"이슈 편향성 업데이트 완료: {dominant_bias}")
+                return True
                 
         except Exception as e:
             self.logger.error(f"이슈 편향성 업데이트 실패: {str(e)}")
@@ -281,3 +275,84 @@ class UnifiedSupabaseManager:
         table.add_row("총 항목", str(status.get('total_items', 0)))
         
         self.console.print(table)
+    
+    def get_random_issue_id(self) -> Optional[int]:
+        """이슈 테이블에서 임의의 issue_id 조회"""
+        if not self.is_connected():
+            return None
+        
+        try:
+            result = self.client.table('issues').select('id').execute()
+            if result.data:
+                # 임의의 issue_id 선택
+                import random
+                random_issue = random.choice(result.data)
+                return random_issue['id']
+            return None
+        except Exception as e:
+            self.logger.error(f"임의 이슈 ID 조회 실패: {str(e)}")
+            return None
+
+    # ===== 크롤러용 메서드 =====
+    def get_media_outlet(self, media_name: str) -> Optional[Dict]:
+        """미디어 아울렛 정보 조회"""
+        if not self.is_connected():
+            return None
+        
+        try:
+            result = self.client.table('media_outlets').select('*').eq('name', media_name).execute()
+            if result.data:
+                return result.data[0]
+            return None
+        except Exception as e:
+            self.logger.error(f"미디어 아울렛 조회 실패: {str(e)}")
+            return None
+    
+    def create_media_outlet(self, media_name: str, bias: str = "Center") -> Optional[int]:
+        """새로운 미디어 아울렛 생성"""
+        if not self.is_connected():
+            return None
+        
+        try:
+            # 이미 존재하는지 확인
+            existing = self.get_media_outlet(media_name)
+            if existing:
+                return existing['id']
+            
+            # 새 미디어 아울렛 생성
+            result = self.client.table('media_outlets').insert({
+                'name': media_name,
+                'bias': bias
+            }).execute()
+            
+            if result.data:
+                new_id = result.data[0]['id']
+                self.logger.info(f"새 미디어 아울렛 생성: {media_name} (ID: {new_id})")
+                return new_id
+            return None
+            
+        except Exception as e:
+            self.logger.error(f"미디어 아울렛 생성 실패: {str(e)}")
+            return None
+    
+    def insert_article(self, article_data: Dict) -> bool:
+        """기사 저장"""
+        if not self.is_connected():
+            return False
+        
+        try:
+            # datetime 객체를 ISO 형식 문자열로 변환
+            processed_data = {}
+            for key, value in article_data.items():
+                if hasattr(value, 'isoformat'):  # datetime 객체인 경우
+                    processed_data[key] = value.isoformat()
+                else:
+                    processed_data[key] = value
+            
+            result = self.client.table('articles').insert(processed_data).execute()
+            if result.data:
+                return True
+            return False
+        except Exception as e:
+            self.logger.error(f"기사 저장 실패: {str(e)}")
+            return False

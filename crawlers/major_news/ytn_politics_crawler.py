@@ -133,17 +133,6 @@ class YTNPoliticsCrawler:
             return HTMLParserUtils.parse_date(date_str_clean)
         
         return None
-                
-            # YTN 날짜 형식: "2025.08.22. 14:21"
-            if re.match(r'^\d{4}\.\d{2}\.\d{2}\.\s+\d{2}:\d{2}$', date_str.strip()):
-                date_part = date_str.strip().split('.')[0:3]
-                year, month, day = date_part
-                return f"{year}-{month.zfill(2)}-{day.zfill(2)}"
-            
-            return None
-        except Exception as e:
-            console.print(f"❌ 날짜 파싱 오류: {str(e)} - {date_str}")
-            return None
 
     def _clean_title(self, title: str) -> str:
         """제목 정리 - 공통 유틸리티 사용"""
@@ -564,4 +553,4 @@ async def main():
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    asyncio.run(asyncio.run(main()))

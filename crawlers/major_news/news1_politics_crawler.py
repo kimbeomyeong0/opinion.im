@@ -1,3 +1,4 @@
+from typing import List, Dict
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
@@ -770,10 +771,49 @@ class News1PoliticsCrawler:
         console.print(table)
         console.print(f"✅ 뉴스1 크롤링 완료! 🎉")
 
+
+    async def collect_all_articles(self) -> List[Dict]:
+        """모든 기사 수집 (표준 인터페이스)"""
+        try:
+            result = await self.crawl_articles()
+            if hasattr(self, 'articles') and self.articles:
+                return self.articles
+            elif result:
+                return result if isinstance(result, list) else []
+            else:
+                return []
+        except Exception as e:
+            print(f"❌ 기사 수집 실패: {str(e)}")
+            return getattr(self, 'articles', [])
+
+
+    async def save_to_supabase(self, articles: List[Dict]) -> Dict[str, int]:
+        """Supabase에 기사 저장"""
+        if not articles:
+            return {"success": 0, "failed": 0}
+        
+        success_count = 0
+        failed_count = 0
+        
+        try:
+            for article in articles:
+                if hasattr(self, 'supabase_manager') and self.supabase_manager:
+                    if self.supabase_manager.insert_article(article):
+                        success_count += 1
+                    else:
+                        failed_count += 1
+                else:
+                    failed_count += 1
+        except Exception as e:
+            print(f"❌ Supabase 저장 오류: {str(e)}")
+            failed_count = len(articles)
+        
+        return {"success": success_count, "failed": failed_count}
+
 async def main():
     """메인 함수"""
     crawler = News1PoliticsCrawler()
     await crawler.run()
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    asyncio.run(asyncio.run(main()))
