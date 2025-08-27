@@ -7,6 +7,10 @@
 - 크롤링 시간: 20초 내
 """
 
+import sys
+import os
+sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+
 import asyncio
 import aiohttp
 import logging
@@ -35,6 +39,37 @@ class KMIBPoliticsCrawler:
         self.media_bias = "Center"
         self.supabase_manager = UnifiedSupabaseManager()
         self.session = None
+        
+    async def create_default_issue(self):
+        """기본 이슈를 생성합니다."""
+        try:
+            # 기존 이슈 확인
+            existing = self.supabase_manager.client.table('issues').select('id').eq('id', 1).execute()
+
+            if not existing.data:
+                # 기본 이슈 생성
+                issue_data = {
+                    'id': 1,
+                    'title': '기본 이슈',
+                    'subtitle': '크롤러로 수집된 기사들을 위한 기본 이슈',
+                    'summary': '다양한 언론사에서 수집된 정치 관련 기사들을 포함하는 기본 이슈입니다.',
+                    'bias_left_pct': 0,
+                    'bias_center_pct': 0,
+                    'bias_right_pct': 0,
+                    'dominant_bias': 'center',
+                    'source_count': 0
+                }
+
+                result = self.supabase_manager.client.table('issues').insert(issue_data).execute()
+                logger.info("기본 이슈 생성 성공")
+                return True
+            else:
+                logger.info("기본 이슈가 이미 존재합니다")
+                return True
+
+        except Exception as e:
+            logger.error(f"기본 이슈 생성 실패: {str(e)}")
+            return False
         
     async def __aenter__(self):
         self.session = aiohttp.ClientSession(
@@ -431,9 +466,8 @@ class KMIBPoliticsCrawler:
         
         for article in articles:
             try:
-                # 크롤링 단계에서는 issue_id를 설정하지 않음 (클러스터링 후 설정)
-                # 임시 이슈 ID 6 사용 (데이터베이스 제약조건 준수)
-                issue = {'id': 6}
+                # 기본 이슈 생성 확인
+                await self.create_default_issue()
                 
                 # 언론사 생성 또는 조회
                 media_outlet = self.supabase_manager.get_media_outlet(self.media_name)
@@ -448,7 +482,7 @@ class KMIBPoliticsCrawler:
                 
                 # 기사 데이터 준비
                 article_data = {
-                    'issue_id': issue['id'],
+                    'issue_id': 1,  # 기본 이슈 ID
                     'media_id': media_outlet['id'],
                     'title': article['title'],
                     'url': article['url'],
@@ -490,6 +524,9 @@ class KMIBPoliticsCrawler:
         if not articles:
             return {"success": 0, "failed": 0}
         
+        # 기본 이슈 생성 확인
+        await self.create_default_issue()
+        
         success_count = 0
         failed_count = 0
         
@@ -514,4 +551,4 @@ async def main():
         await crawler.start_crawling(100)
 
 if __name__ == "__main__":
-    asyncio.run(asyncio.run(main()))
+    asyncio.run(main())

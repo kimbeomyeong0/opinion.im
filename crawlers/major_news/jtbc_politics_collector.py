@@ -6,7 +6,7 @@ JTBC 뉴스 API에서 정치 섹션 기사를 수집하여 Supabase에 저장
 """
 import sys
 import os
-sys.path.append(os.path.dirname(os.path.abspath(os.path.dirname(__file__))))
+sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 import asyncio
 import httpx
@@ -33,6 +33,7 @@ class JTBCPoliticsCollector:
         self.base_url = "https://news-api.jtbc.co.kr"
         self.api_endpoint = "/v1/get/contents/section/list/articles"
         self.media_name = "JTBC"
+        self.media_bias = "Left"  # media_outlets 테이블의 값과 정확히 일치
         self.media_id = 13  # JTBC media_id (media_outlets 테이블 기준)
         
         # API 설정
@@ -45,6 +46,37 @@ class JTBCPoliticsCollector:
         self.network_errors = 0
         self.parsing_errors = 0
         self.content_errors = 0
+
+    async def create_default_issue(self):
+        """기본 이슈를 생성합니다."""
+        try:
+            # 기존 이슈 확인
+            existing = self.supabase_manager.client.table('issues').select('id').eq('id', 1).execute()
+
+            if not existing.data:
+                # 기본 이슈 생성
+                issue_data = {
+                    'id': 1,
+                    'title': '기본 이슈',
+                    'subtitle': '크롤러로 수집된 기사들을 위한 기본 이슈',
+                    'summary': '다양한 언론사에서 수집된 정치 관련 기사들을 포함하는 기본 이슈입니다.',
+                    'bias_left_pct': 0,
+                    'bias_center_pct': 0,
+                    'bias_right_pct': 0,
+                    'dominant_bias': 'center',
+                    'source_count': 0
+                }
+
+                result = self.supabase_manager.client.table('issues').insert(issue_data).execute()
+                logger.info("기본 이슈 생성 성공")
+                return True
+            else:
+                logger.info("기본 이슈가 이미 존재합니다")
+                return True
+
+        except Exception as e:
+            logger.error(f"기본 이슈 생성 실패: {str(e)}")
+            return False
 
     def clean_content(self, text: str) -> str:
         """기사 내용 정제"""
@@ -222,6 +254,9 @@ class JTBCPoliticsCollector:
         if not articles:
             return {"success": 0, "failed": 0, "total": 0}
         
+        # 기본 이슈 생성 확인
+        await self.create_default_issue()
+        
         success_count = 0
         failed_count = 0
         
@@ -234,7 +269,7 @@ class JTBCPoliticsCollector:
                     'content': article['summary'],  # 요약을 본문으로 사용
                     'published_at': article['published_at'],
                     'media_id': self.media_id,
-                    'bias': 'Center',  # JTBC는 중도
+                    'bias': self.media_bias,  # 미디어 편향 사용
                     'issue_id': 1  # 기본값
                 }
                 
@@ -323,4 +358,4 @@ async def main():
         print("❌ 수집된 기사가 없습니다.")
 
 if __name__ == "__main__":
-    asyncio.run(asyncio.run(main()))
+    asyncio.run(main())

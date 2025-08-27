@@ -28,7 +28,7 @@ KBS 정치 뉴스 API 수집기
 
 import sys
 import os
-sys.path.append(os.path.dirname(os.path.abspath(os.path.dirname(__file__))))
+sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 import asyncio
 import httpx
@@ -76,6 +76,37 @@ class KBSPoliticsAPICollector:
         self.network_errors = 0
         self.parsing_errors = 0
         
+    async def create_default_issue(self):
+        """기본 이슈를 생성합니다."""
+        try:
+            # 기존 이슈 확인
+            existing = self.supabase_manager.client.table('issues').select('id').eq('id', 1).execute()
+
+            if not existing.data:
+                # 기본 이슈 생성
+                issue_data = {
+                    'id': 1,
+                    'title': '기본 이슈',
+                    'subtitle': '크롤러로 수집된 기사들을 위한 기본 이슈',
+                    'summary': '다양한 언론사에서 수집된 정치 관련 기사들을 포함하는 기본 이슈입니다.',
+                    'bias_left_pct': 0,
+                    'bias_center_pct': 0,
+                    'bias_right_pct': 0,
+                    'dominant_bias': 'center',
+                    'source_count': 0
+                }
+
+                result = self.supabase_manager.client.table('issues').insert(issue_data).execute()
+                logger.info("기본 이슈 생성 성공")
+                return True
+            else:
+                logger.info("기본 이슈가 이미 존재합니다")
+                return True
+
+        except Exception as e:
+            logger.error(f"기본 이슈 생성 실패: {str(e)}")
+            return False
+    
     def clean_html_content(self, text: str) -> str:
         """HTML 태그 제거 및 <br>을 줄바꿈으로 변환"""
         if not text:
@@ -327,6 +358,9 @@ class KBSPoliticsAPICollector:
         """Supabase에 기사 저장"""
         if not articles:
             return {"success": 0, "failed": 0, "total": 0}
+        
+        # 기본 이슈 생성 확인
+        await self.create_default_issue()
         
         success_count = 0
         failed_count = 0

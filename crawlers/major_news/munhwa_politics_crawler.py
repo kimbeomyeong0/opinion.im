@@ -7,6 +7,10 @@
 - 20초 내 크롤링 완료 목표
 """
 
+import sys
+import os
+sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+
 import asyncio
 import aiohttp
 import time
@@ -32,6 +36,8 @@ class MunhwaPoliticsCrawler:
         self.console = Console()
         self.session: Optional[aiohttp.ClientSession] = None
         self.supabase_manager = UnifiedSupabaseManager()
+        self.media_name = "문화일보"
+        self.media_bias = "Right"
         
         # 문화일보 설정
         self.base_url = "https://www.munhwa.com"
@@ -47,6 +53,37 @@ class MunhwaPoliticsCrawler:
         # 페이지네이션 설정
         self.page_size = 12  # 페이지당 기사 수
         self.max_pages = 10  # 최대 페이지 수
+        
+    async def create_default_issue(self):
+        """기본 이슈를 생성합니다."""
+        try:
+            # 기존 이슈 확인
+            existing = self.supabase_manager.client.table('issues').select('id').eq('id', 1).execute()
+
+            if not existing.data:
+                # 기본 이슈 생성
+                issue_data = {
+                    'id': 1,
+                    'title': '기본 이슈',
+                    'subtitle': '크롤러로 수집된 기사들을 위한 기본 이슈',
+                    'summary': '다양한 언론사에서 수집된 정치 관련 기사들을 포함하는 기본 이슈입니다.',
+                    'bias_left_pct': 0,
+                    'bias_center_pct': 0,
+                    'bias_right_pct': 0,
+                    'dominant_bias': 'center',
+                    'source_count': 0
+                }
+
+                result = self.supabase_manager.client.table('issues').insert(issue_data).execute()
+                logger.info("기본 이슈 생성 성공")
+                return True
+            else:
+                logger.info("기본 이슈가 이미 존재합니다")
+                return True
+
+        except Exception as e:
+            logger.error(f"기본 이슈 생성 실패: {str(e)}")
+            return False
         
     async def __aenter__(self):
         """비동기 컨텍스트 매니저 진입"""
@@ -394,14 +431,13 @@ class MunhwaPoliticsCrawler:
                     try:
                         article_data = await self._fetch_article_details(article_url)
                         if article_data:
-                            # 크롤링 단계에서는 issue_id를 설정하지 않음 (클러스터링 후 설정)
-                            # 임시 이슈 ID 6 사용 (데이터베이스 제약조건 준수)
-                            issue = {'id': 6}
+                            # 기본 이슈 생성 확인
+                            await self.create_default_issue()
                             
                             # 언론사 조회
-                            media_outlet = self.supabase_manager.get_media_outlet("문화일보")
+                            media_outlet = self.supabase_manager.get_media_outlet(self.media_name)
                             if not media_outlet:
-                                media_outlet = self.supabase_manager.create_media_outlet("문화일보", "center")
+                                media_outlet = self.supabase_manager.create_media_outlet(self.media_name, self.media_bias)
                             
                             # 기사 저장
                             article_insert_data = {
@@ -409,7 +445,7 @@ class MunhwaPoliticsCrawler:
                                 'url': article_data['url'],
                                 'content': article_data['content'],
                                 'published_at': article_data['published_at'],
-                                'issue_id': issue['id'] if isinstance(issue, dict) else issue,
+                                'issue_id': 1,  # 기본 이슈 ID
                                 'media_id': media_outlet['id'] if isinstance(media_outlet, dict) else media_outlet,
                                 'bias': media_outlet.get('bias', 'center') if isinstance(media_outlet, dict) else 'center'
                             }
@@ -491,6 +527,9 @@ class MunhwaPoliticsCrawler:
         if not articles:
             return {"success": 0, "failed": 0}
         
+        # 기본 이슈 생성 확인
+        await self.create_default_issue()
+        
         success_count = 0
         failed_count = 0
         
@@ -515,4 +554,4 @@ async def main():
         await crawler.crawl_articles()
 
 if __name__ == "__main__":
-    asyncio.run(asyncio.run(main()))
+    asyncio.run(main())

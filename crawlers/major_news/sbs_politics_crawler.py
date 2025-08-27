@@ -32,7 +32,9 @@ SBS 정치 섹션 크롤러 (비동기 최적화 버전)
 
 import sys
 import os
-sys.path.append(os.path.dirname(os.path.abspath(os.path.dirname(__file__))))
+
+# 모듈 경로 추가
+sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 import asyncio
 import httpx
@@ -64,7 +66,8 @@ class SBSPoliticsCrawler:
         self.section_url = "https://news.sbs.co.kr/news/newsSection.do"
         self.section_type = "01"  # 정치 섹션
         self.media_name = "SBS"
-        self.media_id = 14  # SBS media_id 고정값
+        self.media_bias = "Center"  # SBS는 중도 성향
+        self.media_id = None  # media_outlets에서 가져올 예정
         
         # 크롤링 설정
         self.max_pages = 5  # 최대 5페이지까지만 탐색
@@ -77,6 +80,52 @@ class SBSPoliticsCrawler:
         self.parsing_errors = 0
         self.content_errors = 0
         
+        # media_outlets에서 SBS 정보 가져오기
+        self._init_media_outlet()
+        
+    def _init_media_outlet(self):
+        """media_outlets에서 SBS 정보를 초기화합니다."""
+        try:
+            media_outlet = self.supabase_manager.get_media_outlet(self.media_name)
+            if media_outlet:
+                self.media_id = media_outlet['id']
+                logger.info(f"✅ SBS media_id: {self.media_id}, bias: {self.media_bias}")
+            else:
+                # SBS가 없으면 생성
+                self.media_id = self.supabase_manager.create_media_outlet(self.media_name, self.media_bias)
+                logger.info(f"✅ SBS 생성됨 - media_id: {self.media_id}, bias: {self.media_bias}")
+        except Exception as e:
+            logger.error(f"SBS media_outlet 초기화 실패: {str(e)}")
+            self.media_id = 14  # 기본값 사용
+    
+    async def create_default_issue(self):
+        """기본 이슈가 존재하는지 확인하고 없으면 생성합니다."""
+        try:
+            # issues 테이블에서 id=1이 존재하는지 확인
+            result = self.supabase_manager.supabase.table('issues').select('id').eq('id', 1).execute()
+            
+            if not result.data:
+                # 기본 이슈가 없으면 생성
+                issue_data = {
+                    'id': 1,
+                    'title': '기본 이슈',
+                    'subtitle': '기본 이슈 부제목',
+                    'summary': '기본 이슈 요약',
+                    'bias_left_pct': 0,
+                    'bias_center_pct': 0,
+                    'bias_right_pct': 0,
+                    'dominant_bias': 'Center',
+                    'source_count': 0
+                }
+                
+                self.supabase_manager.supabase.table('issues').insert(issue_data).execute()
+                logger.info("기본 이슈가 생성되었습니다")
+            else:
+                logger.info("기본 이슈가 이미 존재합니다")
+                
+        except Exception as e:
+            logger.error(f"기본 이슈 확인/생성 실패: {str(e)}")
+    
     def clean_content(self, text: str) -> str:
         """본문 내용 정제"""
         if not text:
@@ -409,7 +458,7 @@ class SBSPoliticsCrawler:
                     'content': article['content'],
                     'published_at': article['published_at'],
                     'media_id': self.media_id,
-                    'bias': 'Center',  # SBS는 중도
+                    'bias': self.media_bias,  # SBS는 중도
                     'issue_id': 1  # 기본값
                 }
                 
@@ -490,6 +539,9 @@ async def main():
         # 시작 시간 기록
         start_time = datetime.now()
         
+        # 기본 이슈 확인/생성
+        await crawler.create_default_issue()
+
         # 뉴스 수집
         articles = await crawler.collect_all_articles()
         

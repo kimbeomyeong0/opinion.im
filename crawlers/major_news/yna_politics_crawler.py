@@ -27,7 +27,9 @@ import statistics
 from dataclasses import dataclass
 from contextlib import asynccontextmanager
 
-sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..', 'utils'))
+# 모듈 경로 추가
+sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+
 from utils.supabase_manager_unified import UnifiedSupabaseManager
 from utils.common.html_parser import HTMLParserUtils
 
@@ -70,6 +72,11 @@ class YnaPoliticsCrawler:
         self.console = Console()
         self.debug = debug
         
+        # 미디어 정보 설정
+        self.media_name = "연합뉴스"
+        self.media_bias = "Center"  # 연합뉴스는 중립 성향
+        self.media_id = None  # media_outlets에서 가져올 예정
+        
         # 적응형 딜레이 설정
         self.initial_delay = 0.01
         self.current_delay = self.initial_delay
@@ -96,6 +103,9 @@ class YnaPoliticsCrawler:
         # Supabase 매니저 초기화
         self.supabase_manager = UnifiedSupabaseManager()
         
+        # media_outlets에서 연합뉴스 정보 가져오기
+        self._init_media_outlet()
+        
         # HTTP 세션 설정 (최적화된 커넥터)
         self.connector = aiohttp.TCPConnector(
             limit=100,  # 동시 연결 수
@@ -116,6 +126,49 @@ class YnaPoliticsCrawler:
         )
         
         return self
+    
+    def _init_media_outlet(self):
+        """media_outlets에서 연합뉴스 정보를 초기화합니다."""
+        try:
+            media_outlet = self.supabase_manager.get_media_outlet(self.media_name)
+            if media_outlet:
+                self.media_id = media_outlet['id']
+                logger.info(f"✅ 연합뉴스 media_id: {self.media_id}, bias: {self.media_bias}")
+            else:
+                # 연합뉴스가 없으면 생성
+                self.media_id = self.supabase_manager.create_media_outlet(self.media_name, self.media_bias)
+                logger.info(f"✅ 연합뉴스 생성됨 - media_id: {self.media_id}, bias: {self.media_bias}")
+        except Exception as e:
+            logger.error(f"연합뉴스 media_outlet 초기화 실패: {str(e)}")
+            self.media_id = 17  # 기본값 사용
+    
+    async def create_default_issue(self):
+        """기본 이슈가 존재하는지 확인하고 없으면 생성합니다."""
+        try:
+            # issues 테이블에서 id=1이 존재하는지 확인
+            result = self.supabase_manager.supabase.table('issues').select('id').eq('id', 1).execute()
+            
+            if not result.data:
+                # 기본 이슈가 없으면 생성
+                issue_data = {
+                    'id': 1,
+                    'title': '기본 이슈',
+                    'subtitle': '기본 이슈 부제목',
+                    'summary': '기본 이슈 요약',
+                    'bias_left_pct': 0,
+                    'bias_center_pct': 0,
+                    'bias_right_pct': 0,
+                    'dominant_bias': 'Center',
+                    'source_count': 0
+                }
+                
+                self.supabase_manager.supabase.table('issues').insert(issue_data).execute()
+                logger.info("기본 이슈가 생성되었습니다")
+            else:
+                logger.info("기본 이슈가 이미 존재합니다")
+                
+        except Exception as e:
+            logger.error(f"기본 이슈 확인/생성 실패: {str(e)}")
     
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         """비동기 컨텍스트 매니저 종료"""
@@ -444,7 +497,7 @@ class YnaPoliticsCrawler:
                 'published_at': article_data['published_at'].isoformat(),
                 'media_id': media_id,
                 'bias': 'center',  # 연합뉴스는 중도 성향
-                'issue_id': 6  # 임시 issue_id
+                'issue_id': 1  # 임시 issue_id
             }
             
             # 중복 확인 (URL로 직접 쿼리)
@@ -634,6 +687,9 @@ class YnaPoliticsCrawler:
         if not articles:
             return {"success": 0, "failed": 0}
         
+        # 기본 이슈 확인/생성
+        await self.create_default_issue()
+        
         success_count = 0
         failed_count = 0
         
@@ -658,4 +714,4 @@ async def main():
         await crawler.run()
 
 if __name__ == "__main__":
-    asyncio.run(asyncio.run(main()))
+    asyncio.run(main())

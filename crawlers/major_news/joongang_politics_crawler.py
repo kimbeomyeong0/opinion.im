@@ -1,3 +1,12 @@
+#!/usr/bin/env python3
+"""
+중앙일보 정치 기사 크롤러
+"""
+
+import sys
+import os
+sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+
 import asyncio
 import aiohttp
 import time
@@ -30,6 +39,10 @@ class JoongangPoliticsCrawler:
         self.console = Console()
         self.delay = 0.1
         
+        # 중앙일보는 중도 성향
+        self.media_name = "중앙일보"
+        self.media_bias = "Right"  # media_outlets 테이블의 값과 정확히 일치
+        
         # Supabase 매니저 초기화
         try:
             self.supabase_manager = UnifiedSupabaseManager()
@@ -37,6 +50,73 @@ class JoongangPoliticsCrawler:
         except Exception as e:
             self.console.print(f"[red]Supabase 초기화 실패: {str(e)}[/red]")
             raise
+
+    async def create_default_issue(self):
+        """기본 이슈를 생성합니다."""
+        try:
+            # 기존 이슈 확인
+            existing = self.supabase_manager.client.table('issues').select('id').eq('id', 1).execute()
+
+            if not existing.data:
+                # 기본 이슈 생성
+                issue_data = {
+                    'id': 1,
+                    'title': '기본 이슈',
+                    'subtitle': '크롤러로 수집된 기사들을 위한 기본 이슈',
+                    'summary': '다양한 언론사에서 수집된 정치 관련 기사들을 포함하는 기본 이슈입니다.',
+                    'bias_left_pct': 0,
+                    'bias_center_pct': 0,
+                    'bias_right_pct': 0,
+                    'dominant_bias': 'center',
+                    'source_count': 0
+                }
+
+                result = self.supabase_manager.client.table('issues').insert(issue_data).execute()
+                logger.info("기본 이슈 생성 성공")
+                return True
+            else:
+                logger.info("기본 이슈가 이미 존재합니다")
+                return True
+
+        except Exception as e:
+            logger.error(f"기본 이슈 생성 실패: {str(e)}")
+            return False
+
+    async def save_article_to_supabase(self, article_data: Dict) -> bool:
+        """기사를 Supabase에 저장"""
+        try:
+            # 기본 이슈 생성 확인
+            await self.create_default_issue()
+            
+            # datetime을 문자열로 변환
+            published_at = article_data.get('published_at')
+            if isinstance(published_at, datetime):
+                published_at = published_at.isoformat()
+            
+            # 기사 데이터 준비
+            insert_data = {
+                'issue_id': 1,  # 기본 이슈 ID 사용
+                'media_id': 5,  # 중앙일보 media_id
+                'title': article_data['title'],
+                'url': article_data['url'],
+                'content': article_data['content'],
+                'bias': self.media_bias,
+                'published_at': published_at
+            }
+            
+            # Supabase에 저장
+            result = self.supabase_manager.client.table('articles').insert(insert_data).execute()
+            
+            if result.data:
+                logger.info(f"기사 저장 성공: {article_data['title'][:50]}...")
+                return True
+            else:
+                logger.error(f"기사 저장 실패: {article_data['title'][:50]}...")
+                return False
+                
+        except Exception as e:
+            logger.error(f"기사 저장 중 오류 발생: {str(e)}")
+            return False
     
     async def __aenter__(self):
         self.session = aiohttp.ClientSession(
@@ -263,18 +343,8 @@ class JoongangPoliticsCrawler:
         
         self.console.print("\n데이터베이스에 저장 중...")
         
-        # 중앙일보 미디어 아웃렛 정보
-        media_name = "중앙일보"
-        
-        # 이슈 생성 또는 가져오기
-        # 크롤링 단계에서는 issue_id를 설정하지 않음 (클러스터링 후 설정)
-        # 임시 이슈 ID 6 사용 (데이터베이스 제약조건 준수)
-        issue = {'id': 6}
-        
-        # 미디어 아웃렛 정보 가져오기
-        media_outlet = self.supabase_manager.get_media_outlet(media_name)
-        if not media_outlet:
-            media_outlet = self.supabase_manager.create_media_outlet(media_name, "center")
+        # 기본 이슈 생성 확인
+        await self.create_default_issue()
         
         # 기사 저장
         saved_count = 0
@@ -295,12 +365,12 @@ class JoongangPoliticsCrawler:
                 else:
                     # 새 기사 삽입
                     self.supabase_manager.insert_article({
-                        'issue_id': issue['id'],
-                        'media_id': media_outlet['id'],
+                        'issue_id': 1,  # 기본 이슈 ID 사용
+                        'media_id': 5,  # 중앙일보 media_id
                         'title': article['title'],
                         'url': article['url'],
                         'content': article['content'],
-                        'bias': media_outlet['bias'],
+                        'bias': self.media_bias,  # media_outlets 테이블의 값과 정확히 일치
                         'published_at': article['published_at']
                     })
                     
@@ -315,8 +385,8 @@ class JoongangPoliticsCrawler:
         
         # 이슈 편향성 업데이트
         try:
-            self.supabase_manager.update_issue_bias(issue['id'])
-            self.console.print(f"[green]이슈 편향성 업데이트 성공: {issue['id']}[/green]")
+            self.supabase_manager.update_issue_bias(1)  # 기본 이슈 ID 사용
+            self.console.print(f"[green]이슈 편향성 업데이트 성공: 1[/green]")
         except Exception as e:
             logger.error(f"이슈 편향성 업데이트 실패: {str(e)}")
     
@@ -465,4 +535,4 @@ async def main():
         await crawler.run()
 
 if __name__ == "__main__":
-    asyncio.run(asyncio.run(main()))
+    asyncio.run(main())

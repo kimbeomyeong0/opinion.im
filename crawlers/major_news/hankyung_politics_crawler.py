@@ -11,6 +11,8 @@
 - 저장: Supabase articles 테이블
 - 속도: 20초 내외
 """
+import sys
+import os
 import requests
 from bs4 import BeautifulSoup
 import time
@@ -19,6 +21,10 @@ from tqdm import tqdm
 from typing import List, Dict, Optional, Set
 from datetime import datetime
 import logging
+
+# 프로젝트 루트 디렉토리를 Python 경로에 추가
+sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+
 from utils.supabase_manager_unified import UnifiedSupabaseManager
 
 # 로깅 설정
@@ -283,14 +289,15 @@ class HankyungPoliticsCrawler:
                 page += 1
                 time.sleep(self.adaptive_delay)
         
-        # 결과 저장
-        self.save_to_supabase()
+        # 결과 저장 (메인에서 처리하므로 여기서는 제거)
+        # self.save_to_supabase()
         
         # 성능 분석
         end_time = time.time()
         duration = end_time - start_time
         
-        self.display_results(duration)
+        # display_results는 메인에서 처리하므로 여기서는 제거
+        # self.display_results(duration)
         return self.articles
     
     def adjust_delay(self, success: bool):
@@ -302,69 +309,36 @@ class HankyungPoliticsCrawler:
             # 실패 시 딜레이 증가
             self.adaptive_delay = min(self.adaptive_delay * 1.2, self.max_delay)
     
-    def save_to_supabase(self, articles: List[Dict] = None):
-        """결과를 Supabase에 저장"""
-        if articles is None:
-            articles = self.articles
-        try:
-            if not self.supabase_manager.is_connected():
-                print("❌ Supabase에 연결되지 않았습니다.")
-                return
-            
-            print(f"💾 Supabase에 {len(articles)}개 기사 저장 중...")
-            
-            # media_outlet 생성 또는 조회
-            media_outlet = self.supabase_manager.get_media_outlet(self.media_name)
-            if media_outlet:
-                media_id = media_outlet['id']
-                print(f"✅ 기존 언론사 사용: {self.media_name} (ID: {media_id})")
-            else:
-                media_id = self.supabase_manager.create_media_outlet(self.media_name, self.media_bias)
-                if media_id:
-                    print(f"✅ 새 언론사 생성: {self.media_name} (ID: {media_id})")
+    async def save_to_database(self, articles: List[Dict]):
+        """데이터베이스에 기사 저장"""
+        if not articles:
+            print("저장할 기사가 없습니다.")
+            return
+        
+        print(f"\n💾 {len(articles)}개 기사를 데이터베이스에 저장 중...")
+        
+        successful_saves = 0
+        failed_saves = 0
+        
+        for article in articles:
+            try:
+                # 새로 만든 저장 메서드 사용
+                if await self.save_article_to_supabase(article):
+                    successful_saves += 1
                 else:
-                    print(f"❌ 언론사 생성 실패: {self.media_name}")
-                    return
-            
-            # 기사들을 Supabase에 저장
-            successful_saves = 0
-            failed_saves = 0
-            
-            for article in self.articles:
-                try:
-                    # Supabase articles 테이블 형식에 맞게 데이터 구성
-                    article_data = {
-                        'title': article['title'],
-                        'url': article['url'],
-                        'content': article['content'],
-                        'published_at': article['published_at'],
-                        'media_id': media_id,
-                        'bias': self.media_bias,  # media_outlets 테이블의 bias 참조
-                        'issue_id': 1  # 임시로 기본 이슈 ID 사용
-                    }
-                    
-                    # Supabase에 저장
-                    article_id = self.supabase_manager.insert_article(article_data)
-                    if article_id:
-                        successful_saves += 1
-                    else:
-                        failed_saves += 1
-                        
-                except Exception as e:
                     failed_saves += 1
-                    print(f"❌ 기사 저장 실패: {article['title']} - {str(e)}")
-            
-            print(f"\n📊 Supabase 저장 결과:")
-            print(f"  • 성공: {successful_saves}개")
-            print(f"  • 실패: {failed_saves}개")
-            print(f"  • 총 기사: {len(self.articles)}개")
-            
-            if successful_saves > 0:
-                print(f"✅ {successful_saves}개 기사가 Supabase에 성공적으로 저장되었습니다!")
-            
-        except Exception as e:
-            print(f"❌ Supabase 저장 중 오류 발생: {str(e)}")
-            logger.error(f"Supabase 저장 오류: {str(e)}", exc_info=True)
+                    
+            except Exception as e:
+                failed_saves += 1
+                print(f"❌ 기사 저장 실패: {article['title']} - {str(e)}")
+        
+        print(f"\n📊 Supabase 저장 결과:")
+        print(f"  • 성공: {successful_saves}개")
+        print(f"  • 실패: {failed_saves}개")
+        print(f"  • 총 기사: {len(articles)}개")
+        
+        if successful_saves > 0:
+            print(f"✅ {successful_saves}개 기사가 Supabase에 성공적으로 저장되었습니다!")
     
     def display_results(self, duration: float):
         """크롤링 결과 표시"""
@@ -374,7 +348,13 @@ class HankyungPoliticsCrawler:
         print(f"📊 수집 결과:")
         print(f"  • 총 기사 수: {len(self.articles)}개")
         print(f"  • 소요 시간: {duration:.1f}초")
-        print(f"  • 평균 속도: {len(self.articles)/duration:.1f} 기사/초")
+        
+        # 0으로 나누는 문제 해결
+        if duration > 0:
+            print(f"  • 평균 속도: {len(self.articles)/duration:.1f} 기사/초")
+        else:
+            print(f"  • 평균 속도: 계산 불가")
+            
         print(f"  • 네트워크 오류: {self.network_errors}회")
         print(f"  • 파싱 오류: {self.parsing_errors}회")
         
@@ -412,18 +392,86 @@ class HankyungPoliticsCrawler:
             logger.error(f"크롤러 오류: {str(e)}", exc_info=True)
             return self.articles
 
-def main():
+    async def create_default_issue(self):
+        """기본 이슈를 생성합니다."""
+        try:
+            # 기존 이슈 확인
+            existing = self.supabase_manager.client.table('issues').select('id').eq('id', 1).execute()
+            
+            if not existing.data:
+                # 기본 이슈 생성
+                issue_data = {
+                    'id': 1,
+                    'title': '기본 이슈',
+                    'subtitle': '크롤러로 수집된 기사들을 위한 기본 이슈',
+                    'summary': '다양한 언론사에서 수집된 정치 관련 기사들을 포함하는 기본 이슈입니다.',
+                    'bias_left_pct': 0,
+                    'bias_center_pct': 0,
+                    'bias_right_pct': 0,
+                    'dominant_bias': 'center',
+                    'source_count': 0
+                }
+                
+                result = self.supabase_manager.client.table('issues').insert(issue_data).execute()
+                logger.info("기본 이슈 생성 성공")
+                return True
+            else:
+                logger.info("기본 이슈가 이미 존재합니다")
+                return True
+                
+        except Exception as e:
+            logger.error(f"기본 이슈 생성 실패: {str(e)}")
+            return False
+
+    async def save_article_to_supabase(self, article_data: Dict) -> bool:
+        """기사를 Supabase에 저장"""
+        try:
+            # 기본 이슈 생성 확인
+            await self.create_default_issue()
+            
+            # datetime을 문자열로 변환
+            published_at = article_data.get('published_at')
+            if isinstance(published_at, datetime):
+                published_at = published_at.isoformat()
+            
+            # 기사 데이터 준비
+            insert_data = {
+                'issue_id': 1,  # 기본 이슈 ID 사용
+                'media_id': 4,  # 한경 media_id
+                'title': article_data['title'],
+                'url': article_data['url'],
+                'content': article_data['content'],
+                'bias': self.media_bias.lower(),
+                'published_at': published_at
+            }
+            
+            # Supabase에 저장
+            result = self.supabase_manager.client.table('articles').insert(insert_data).execute()
+            
+            if result.data:
+                logger.info(f"기사 저장 성공: {article_data['title'][:50]}...")
+                return True
+            else:
+                logger.error(f"기사 저장 실패: {article_data['title'][:50]}...")
+                return False
+                
+        except Exception as e:
+            logger.error(f"기사 저장 중 오류 발생: {str(e)}")
+            return False
+
+async def main():
     """메인 함수"""
-    try:
-        crawler = HankyungPoliticsCrawler(max_articles=100)
-        articles = crawler.run()
-        
-        print(f"\n🎉 한국경제 정치 전체 페이지 크롤링 완료!")
-        print(f"💾 Supabase에 저장 완료!")
-        
-    except Exception as e:
-        print(f"\n❌ 크롤러 실행 중 오류 발생: {str(e)}")
-        logger.error(f"크롤러 오류: {str(e)}", exc_info=True)
+    crawler = HankyungPoliticsCrawler(max_articles=100)
+    
+    # 기사 수집
+    articles = await crawler.collect_all_articles()
+    
+    # 결과 표시
+    crawler.display_results(0)  # 시간은 임시로 0으로 설정
+    
+    # 데이터베이스 저장
+    await crawler.save_to_database(articles)
 
 if __name__ == "__main__":
-    main()
+    import asyncio
+    asyncio.run(main())

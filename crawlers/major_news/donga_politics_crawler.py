@@ -1,6 +1,8 @@
 import asyncio
 import aiohttp
 import time
+import sys
+import os
 from bs4 import BeautifulSoup
 from typing import List, Dict, Optional
 from rich.console import Console
@@ -15,11 +17,11 @@ from datetime import datetime
 import re
 from urllib.parse import urljoin, urlparse
 import logging
-from utils.supabase_manager_unified import UnifiedSupabaseManager
-import json
-import sys
-import os
+
+# 프로젝트 루트 디렉토리를 Python 경로에 추가
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+
+from utils.supabase_manager_unified import UnifiedSupabaseManager
 from utils.common.html_parser import HTMLParserUtils
 
 # 로깅 설정
@@ -376,59 +378,25 @@ class DongaPoliticsCrawler:
         
         self.console.print(f"\n💾 {len(articles)}개 기사를 데이터베이스에 저장 중...")
         
-        # 크롤링 단계에서는 issue_id를 설정하지 않음 (클러스터링 후 설정)
-        # 임시 이슈 ID 6 사용 (데이터베이스 제약조건 준수)
-        issue = {'id': 6}
-        
-        # 미디어 아웃렛 정보 가져오기
-        media_outlet = self.supabase_manager.get_media_outlet(self.media_name)
-        if not media_outlet:
-            media_id = self.supabase_manager.create_media_outlet(self.media_name, self.media_bias)
-            media_outlet = {'id': media_id, 'bias': self.media_bias}
-        
-        # 기사 저장
         saved_count = 0
+        failed_count = 0
+        
         for article in articles:
             try:
-                # 기존 기사 확인
-                existing = self.supabase_manager.client.table('articles').select('id').eq('url', article['url']).execute()
-                
-                if existing.data:
-                    # 기존 기사 업데이트
-                    self.supabase_manager.client.table('articles').update({
-                        'title': article['title'],
-                        'content': article['content'],
-                        'published_at': article['published_at'].isoformat() if article['published_at'] else None
-                    }).eq('url', article['url']).execute()
-                    
-                    self.console.print(f"[yellow]기존 기사 업데이트: {article['title'][:50]}...[/yellow]")
-                else:
-                    # 새 기사 삽입
-                    self.supabase_manager.insert_article({
-                        'issue_id': issue['id'],
-                        'media_id': media_outlet['id'],
-                        'title': article['title'],
-                        'url': article['url'],
-                        'content': article['content'],
-                        'bias': media_outlet['bias'],
-                        'published_at': article['published_at']
-                    })
-                    
+                # 새로 만든 저장 메서드 사용
+                if await self.save_article_to_supabase(article):
                     saved_count += 1
-                    self.console.print(f"[green]기사 저장 성공: {article['title'][:50]}...[/green]")
-                
+                else:
+                    failed_count += 1
+                    
             except Exception as e:
                 self.console.print(f"[red]기사 저장 실패: {article['title'][:50]}... - {str(e)}[/red]")
                 logger.error(f"기사 저장 실패: {str(e)}")
+                failed_count += 1
         
         self.console.print(f"\n✅ 총 {saved_count}개 기사가 성공적으로 저장되었습니다!")
-        
-        # 이슈 편향성 업데이트
-        try:
-            self.supabase_manager.update_issue_bias(issue['id'])
-            self.console.print(f"[green]이슈 편향성 업데이트 성공: {issue['id']}[/green]")
-        except Exception as e:
-            logger.error(f"이슈 편향성 업데이트 실패: {str(e)}")
+        if failed_count > 0:
+            self.console.print(f"[red]실패: {failed_count}개[/red]")
     
     async def run(self):
         """크롤러 실행"""
@@ -509,10 +477,74 @@ class DongaPoliticsCrawler:
         
         return {"success": success_count, "failed": failed_count}
 
+    async def create_default_issue(self):
+        """기본 이슈를 생성합니다."""
+        try:
+            # 기존 이슈 확인
+            existing = self.supabase_manager.client.table('issues').select('id').eq('id', 1).execute()
+            
+            if not existing.data:
+                # 기본 이슈 생성
+                issue_data = {
+                    'id': 1,
+                    'title': '기본 이슈',
+                    'subtitle': '크롤러로 수집된 기사들을 위한 기본 이슈',
+                    'summary': '다양한 언론사에서 수집된 정치 관련 기사들을 포함하는 기본 이슈입니다.',
+                    'bias_left_pct': 0,
+                    'bias_center_pct': 0,
+                    'bias_right_pct': 0,
+                    'dominant_bias': 'center',
+                    'source_count': 0
+                }
+                
+                result = self.supabase_manager.client.table('issues').insert(issue_data).execute()
+                self.console.print("✅ 기본 이슈 생성 완료")
+            else:
+                self.console.print("ℹ️ 기본 이슈가 이미 존재합니다")
+                
+        except Exception as e:
+            self.console.print(f"❌ 기본 이슈 생성 실패: {str(e)}")
+
+    async def save_article_to_supabase(self, article_data: Dict) -> bool:
+        """기사를 Supabase에 저장"""
+        try:
+            # 기본 이슈 생성 확인
+            await self.create_default_issue()
+            
+            # datetime을 문자열로 변환
+            published_at = article_data.get('published_at')
+            if isinstance(published_at, datetime):
+                published_at = published_at.isoformat()
+            
+            # 기사 데이터 준비
+            insert_data = {
+                'issue_id': 1,  # 기본 이슈 ID 사용
+                'media_id': 2,  # 동아일보 media_id
+                'title': article_data['title'],
+                'url': article_data['url'],
+                'content': article_data['content'],
+                'bias': self.media_bias.lower(),
+                'published_at': published_at
+            }
+            
+            # 기사 저장
+            result = self.supabase_manager.client.table('articles').insert(insert_data).execute()
+            
+            if result.data:
+                self.console.print(f"✅ 기사 저장 성공: {article_data['title'][:30]}...")
+                return True
+            else:
+                self.console.print(f"❌ 기사 저장 실패: {article_data['title'][:30]}...")
+                return False
+                
+        except Exception as e:
+            self.console.print(f"❌ 기사 저장 오류: {str(e)}")
+            return False
+
 async def main():
     """메인 함수"""
     crawler = DongaPoliticsCrawler(max_articles=100)
     await crawler.run()
 
 if __name__ == "__main__":
-    asyncio.run(asyncio.run(main()))
+    asyncio.run(main())

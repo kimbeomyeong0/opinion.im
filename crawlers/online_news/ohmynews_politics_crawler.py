@@ -13,11 +13,14 @@ import aiohttp
 import time
 from bs4 import BeautifulSoup
 from urllib.parse import urljoin
-from utils.supabase_manager_unified import UnifiedSupabaseManager
 import re
 import sys
 import os
+
+# 모듈 경로 추가
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+
+from utils.supabase_manager_unified import UnifiedSupabaseManager
 from utils.common.html_parser import HTMLParserUtils
 
 class OhMyNewsPoliticsCrawler:
@@ -25,10 +28,62 @@ class OhMyNewsPoliticsCrawler:
         self.base_url = "https://www.ohmynews.com/NWS_Web/ArticlePage/Total_Article.aspx"
         self.politics_url = f"{self.base_url}?PAGE_CD=C0400"
         self.manager = UnifiedSupabaseManager()
-        self.media_id = 9  # 오마이뉴스 media_id
+        
+        # 미디어 정보 설정
+        self.media_name = "오마이뉴스"
+        self.media_bias = "Left"  # 오마이뉴스는 좌편향 성향
+        self.media_id = None  # media_outlets에서 가져올 예정
+        
+        # 기본 설정
         self.issue_id = 1  # 기본 issue_id
         self.collected_articles = set()
         
+        # media_outlets에서 오마이뉴스 정보 가져오기
+        self._init_media_outlet()
+        
+    def _init_media_outlet(self):
+        """media_outlets에서 오마이뉴스 정보를 초기화합니다."""
+        try:
+            media_outlet = self.manager.get_media_outlet(self.media_name)
+            if media_outlet:
+                self.media_id = media_outlet['id']
+                print(f"✅ 오마이뉴스 media_id: {self.media_id}, bias: {self.media_bias}")
+            else:
+                # 오마이뉴스가 없으면 생성
+                self.media_id = self.manager.create_media_outlet(self.media_name, self.media_bias)
+                print(f"✅ 오마이뉴스 생성됨 - media_id: {self.media_id}, bias: {self.media_bias}")
+        except Exception as e:
+            print(f"오마이뉴스 media_outlet 초기화 실패: {str(e)}")
+            self.media_id = 9  # 기본값 사용
+    
+    async def create_default_issue(self):
+        """기본 이슈가 존재하는지 확인하고 없으면 생성합니다."""
+        try:
+            # issues 테이블에서 id=1이 존재하는지 확인
+            result = self.manager.client.table('issues').select('id').eq('id', 1).execute()
+            
+            if not result.data:
+                # 기본 이슈가 없으면 생성
+                issue_data = {
+                    'id': 1,
+                    'title': '기본 이슈',
+                    'subtitle': '기본 이슈 부제목',
+                    'summary': '기본 이슈 요약',
+                    'bias_left_pct': 0,
+                    'bias_center_pct': 0,
+                    'bias_right_pct': 0,
+                    'dominant_bias': 'Center',
+                    'source_count': 0
+                }
+                
+                self.manager.client.table('issues').insert(issue_data).execute()
+                print("기본 이슈가 생성되었습니다")
+            else:
+                print("기본 이슈가 이미 존재합니다")
+                
+        except Exception as e:
+            print(f"기본 이슈 확인/생성 실패: {str(e)}")
+    
     async def get_media_outlet(self):
         """미디어 아울렛 정보를 가져옵니다."""
         try:
@@ -331,13 +386,16 @@ class OhMyNewsPoliticsCrawler:
         if not articles:
             return {"success": 0, "failed": 0}
         
+        # 기본 이슈 확인/생성
+        await self.create_default_issue()
+        
         success_count = 0
         failed_count = 0
         
         try:
             for article in articles:
-                if hasattr(self, 'supabase_manager') and self.supabase_manager:
-                    if self.supabase_manager.insert_article(article):
+                if hasattr(self, 'manager') and self.manager:
+                    if self.manager.insert_article(article):
                         success_count += 1
                     else:
                         failed_count += 1
@@ -355,4 +413,4 @@ async def main():
     await crawler.crawl_articles(100)
 
 if __name__ == "__main__":
-    asyncio.run(asyncio.run(main()))
+    asyncio.run(main())

@@ -1,4 +1,3 @@
-from typing import List, Dict
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
@@ -6,11 +5,16 @@ from typing import List, Dict
 경향신문 웹사이트에서 정치 기사를 수집하여 Supabase DB에 저장합니다.
 """
 
+import sys
+import os
+sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+
 import asyncio
 import aiohttp
 import logging
 from bs4 import BeautifulSoup
 from datetime import datetime, timedelta
+from typing import List, Dict
 from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TimeElapsedColumn
 from rich.table import Table
@@ -31,9 +35,43 @@ class KhanPoliticsCrawler:
         self.politics_url = "https://www.khan.co.kr/politics"
         self.supabase_manager = UnifiedSupabaseManager()
         self.media_outlet = "경향신문"
+        self.media_name = "경향신문"
+        self.media_bias = "Left"  # media_outlets 테이블의 값과 정확히 일치
+        self.media_id = 16  # 경향신문 media_id
         self.headers = {
             'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
         }
+
+    async def create_default_issue(self):
+        """기본 이슈를 생성합니다."""
+        try:
+            # 기존 이슈 확인
+            existing = self.supabase_manager.client.table('issues').select('id').eq('id', 1).execute()
+
+            if not existing.data:
+                # 기본 이슈 생성
+                issue_data = {
+                    'id': 1,
+                    'title': '기본 이슈',
+                    'subtitle': '크롤러로 수집된 기사들을 위한 기본 이슈',
+                    'summary': '다양한 언론사에서 수집된 정치 관련 기사들을 포함하는 기본 이슈입니다.',
+                    'bias_left_pct': 0,
+                    'bias_center_pct': 0,
+                    'bias_right_pct': 0,
+                    'dominant_bias': 'center',
+                    'source_count': 0
+                }
+
+                result = self.supabase_manager.client.table('issues').insert(issue_data).execute()
+                logger.info("기본 이슈 생성 성공")
+                return True
+            else:
+                logger.info("기본 이슈가 이미 존재합니다")
+                return True
+
+        except Exception as e:
+            logger.error(f"기본 이슈 생성 실패: {str(e)}")
+            return False
 
     async def get_page_content(self, session, url):
         """페이지 내용을 가져옵니다."""
@@ -318,7 +356,7 @@ class KhanPoliticsCrawler:
                     'content': content,
                     'published_at': publish_date,
                     'media_id': self.supabase_manager.get_media_outlet(self.media_outlet)['id'],
-                    'issue_id': 6  # 임시 issue_id
+                    'issue_id': 1  # 기본 이슈 ID
                 }
                 
                 result = self.supabase_manager.insert_article(article_data)
@@ -426,6 +464,9 @@ class KhanPoliticsCrawler:
         if not articles:
             return {"success": 0, "failed": 0}
         
+        # 기본 이슈 생성 확인
+        await self.create_default_issue()
+        
         success_count = 0
         failed_count = 0
         
@@ -450,4 +491,4 @@ async def main():
     await crawler.run()
 
 if __name__ == "__main__":
-    asyncio.run(asyncio.run(main()))
+    asyncio.run(main())

@@ -10,12 +10,17 @@ import re
 import httpx
 import random
 import traceback
+import sys
+import os
 from datetime import datetime, timedelta
 from typing import List, Dict, Optional
 from urllib.parse import urljoin, urlparse
 from bs4 import BeautifulSoup
 from rich.console import Console
 from rich.table import Table
+
+# 프로젝트 루트 디렉토리를 Python 경로에 추가
+sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 # 프로젝트 내부 모듈
 from utils.supabase_manager_unified import UnifiedSupabaseManager
@@ -702,6 +707,65 @@ class ChosunPoliticsCollector:
         console.print(f"   - 성공률: {(success_count / len(articles) * 100):.1f}%")
         
         return {"success": success_count, "failed": failed_count}
+
+    async def create_default_issue(self):
+        """기본 이슈를 생성합니다."""
+        try:
+            # 기존 이슈 확인
+            existing = self.supabase_manager.client.table('issues').select('id').eq('id', 1).execute()
+            
+            if not existing.data:
+                # 기본 이슈 생성
+                issue_data = {
+                    'id': 1,
+                    'title': '기본 이슈',
+                    'subtitle': '크롤러로 수집된 기사들을 위한 기본 이슈',
+                    'summary': '다양한 언론사에서 수집된 정치 관련 기사들을 포함하는 기본 이슈입니다.',
+                    'bias_left_pct': 0,
+                    'bias_center_pct': 0,
+                    'bias_right_pct': 0,
+                    'dominant_bias': 'center',
+                    'source_count': 0
+                }
+                
+                result = self.supabase_manager.client.table('issues').insert(issue_data).execute()
+                console.print("✅ 기본 이슈 생성 완료")
+            else:
+                console.print("ℹ️ 기본 이슈가 이미 존재합니다")
+                
+        except Exception as e:
+            console.print(f"❌ 기본 이슈 생성 실패: {str(e)}")
+
+    async def _save_article_to_supabase(self, article_data: Dict) -> bool:
+        """기사를 Supabase에 저장"""
+        try:
+            # 기본 이슈 생성 확인
+            await self.create_default_issue()
+            
+            # 기사 데이터 준비
+            insert_data = {
+                'issue_id': 1,  # 기본 이슈 ID 사용
+                'media_id': 1,  # 조선일보 media_id
+                'title': article_data['title'],
+                'url': article_data['url'],
+                'content': article_data['content'],
+                'bias': self.media_bias.lower(),
+                'published_at': article_data['publish_date']
+            }
+            
+            # 기사 저장
+            result = self.supabase_manager.client.table('articles').insert(insert_data).execute()
+            
+            if result.data:
+                console.print(f"✅ 기사 저장 성공: {article_data['title'][:30]}...")
+                return True
+            else:
+                console.print(f"❌ 기사 저장 실패: {article_data['title'][:30]}...")
+                return False
+                
+        except Exception as e:
+            console.print(f"❌ 기사 저장 오류: {str(e)}")
+            return False
 
     async def run(self):
         """크롤러 실행"""

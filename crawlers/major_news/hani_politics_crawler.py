@@ -10,6 +10,8 @@
 import asyncio
 import aiohttp
 import time
+import sys
+import os
 from datetime import datetime
 from typing import List, Dict, Any, Optional
 from bs4 import BeautifulSoup
@@ -18,6 +20,10 @@ from rich.table import Table
 from rich.panel import Panel
 from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TimeElapsedColumn
 import logging
+
+# 프로젝트 루트 디렉토리를 Python 경로에 추가
+sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+
 from utils.supabase_manager_unified import UnifiedSupabaseManager
 
 # 로깅 설정
@@ -36,6 +42,10 @@ class HaniPoliticsCrawler:
         # 한겨레 설정
         self.base_url = "https://www.hani.co.kr"
         self.politics_url = "https://www.hani.co.kr/arti/politics"
+        
+        # 한겨레는 좌파 언론사
+        self.media_name = "한겨레"
+        self.media_bias = "Left"
         
         # 통계
         self.total_articles = 0
@@ -287,8 +297,8 @@ class HaniPoliticsCrawler:
                         article_data = await self._fetch_article_details(article_url)
                         if article_data:
                             # 크롤링 단계에서는 issue_id를 설정하지 않음 (클러스터링 후 설정)
-                            # 임시 이슈 ID 6 사용 (데이터베이스 제약조건 준수)
-                            issue = {'id': 6}
+                            # 기본 이슈 ID 1 사용
+                            issue = {'id': 1}
                             
                             # 언론사 조회
                             media_outlet = self.supabase_manager.get_media_outlet("한겨레")
@@ -378,33 +388,106 @@ class HaniPoliticsCrawler:
             return getattr(self, 'articles', [])
 
 
-    async def save_to_supabase(self, articles: List[Dict]) -> Dict[str, int]:
-        """Supabase에 기사 저장"""
+    async def save_to_database(self, articles: List[Dict]):
+        """데이터베이스에 기사 저장"""
         if not articles:
-            return {"success": 0, "failed": 0}
+            self.console.print("[yellow]저장할 기사가 없습니다.[/yellow]")
+            return
         
-        success_count = 0
+        self.console.print(f"\n💾 {len(articles)}개 기사를 데이터베이스에 저장 중...")
+        
+        saved_count = 0
         failed_count = 0
         
-        try:
-            for article in articles:
-                if hasattr(self, 'supabase_manager') and self.supabase_manager:
-                    if self.supabase_manager.insert_article(article):
-                        success_count += 1
-                    else:
-                        failed_count += 1
+        for article in articles:
+            try:
+                # 새로 만든 저장 메서드 사용
+                if await self.save_article_to_supabase(article):
+                    saved_count += 1
                 else:
                     failed_count += 1
-        except Exception as e:
-            print(f"❌ Supabase 저장 오류: {str(e)}")
-            failed_count = len(articles)
+                    
+            except Exception as e:
+                self.console.print(f"[red]기사 저장 실패: {article['title'][:50]}... - {str(e)}[/red]")
+                logger.error(f"기사 저장 실패: {str(e)}")
+                failed_count += 1
         
-        return {"success": success_count, "failed": failed_count}
+        self.console.print(f"\n✅ 총 {saved_count}개 기사가 성공적으로 저장되었습니다!")
+        if failed_count > 0:
+            self.console.print(f"[red]실패: {failed_count}개[/red]")
+
+    async def create_default_issue(self):
+        """기본 이슈를 생성합니다."""
+        try:
+            # 기존 이슈 확인
+            existing = self.supabase_manager.client.table('issues').select('id').eq('id', 1).execute()
+            
+            if not existing.data:
+                # 기본 이슈 생성
+                issue_data = {
+                    'id': 1,
+                    'title': '기본 이슈',
+                    'subtitle': '크롤러로 수집된 기사들을 위한 기본 이슈',
+                    'summary': '다양한 언론사에서 수집된 정치 관련 기사들을 포함하는 기본 이슈입니다.',
+                    'bias_left_pct': 0,
+                    'bias_center_pct': 0,
+                    'bias_right_pct': 0,
+                    'dominant_bias': 'center',
+                    'source_count': 0
+                }
+                
+                result = self.supabase_manager.client.table('issues').insert(issue_data).execute()
+                self.console.print("✅ 기본 이슈 생성 완료")
+            else:
+                self.console.print("ℹ️ 기본 이슈가 이미 존재합니다")
+                
+        except Exception as e:
+            self.console.print(f"❌ 기본 이슈 생성 실패: {str(e)}")
+
+    async def save_article_to_supabase(self, article_data: Dict) -> bool:
+        """기사를 Supabase에 저장"""
+        try:
+            # 기본 이슈 생성 확인
+            await self.create_default_issue()
+            
+            # datetime을 문자열로 변환
+            published_at = article_data.get('published_at')
+            if isinstance(published_at, datetime):
+                published_at = published_at.isoformat()
+            
+            # 기사 데이터 준비
+            insert_data = {
+                'issue_id': 1,  # 기본 이슈 ID 사용
+                'media_id': 3,  # 한겨레 media_id
+                'title': article_data['title'],
+                'url': article_data['url'],
+                'content': article_data['content'],
+                'bias': self.media_bias.lower(),
+                'published_at': published_at
+            }
+            
+            # 기사 저장
+            result = self.supabase_manager.client.table('articles').insert(insert_data).execute()
+            
+            if result.data:
+                self.console.print(f"✅ 기사 저장 성공: {article_data['title'][:30]}...")
+                return True
+            else:
+                self.console.print(f"❌ 기사 저장 실패: {article_data['title'][:30]}...")
+                return False
+                
+        except Exception as e:
+            self.console.print(f"❌ 기사 저장 오류: {str(e)}")
+            return False
 
 async def main():
     """메인 함수"""
-    async with HaniPoliticsCrawler() as crawler:
-        await crawler.crawl_articles()
+    async with HaniPoliticsCrawler(max_articles=100) as crawler:
+        # 기사 수집
+        articles = await crawler.crawl_articles()
+        
+        # 데이터베이스 저장
+        await crawler.save_to_database(articles)
 
 if __name__ == "__main__":
-    asyncio.run(asyncio.run(main()))
+    asyncio.run(main())

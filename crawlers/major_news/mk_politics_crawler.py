@@ -7,6 +7,10 @@
 - 중복 제외
 - 중앙일보 크롤러 기반으로 빠른 제작
 """
+import sys
+import os
+sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+
 import asyncio
 import aiohttp
 import time
@@ -25,9 +29,6 @@ from datetime import datetime
 import re
 from urllib.parse import urljoin, urlparse
 import logging
-import sys
-import os
-sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..', 'utils'))
 from utils.supabase_manager_unified import UnifiedSupabaseManager
 import json
 
@@ -43,6 +44,8 @@ class MKPoliticsCrawler:
         self.console = Console()
         self.delay = 0.05  # 빠른 크롤링을 위해 딜레이 최소화
         self.debug = debug  # 디버깅 모드
+        self.media_name = "매일경제"
+        self.media_bias = "Right"
         
         # Supabase 매니저 초기화
         try:
@@ -52,6 +55,37 @@ class MKPoliticsCrawler:
             self.console.print(f"[red]Supabase 초기화 실패: {str(e)}[/red]")
             raise
     
+    async def create_default_issue(self):
+        """기본 이슈를 생성합니다."""
+        try:
+            # 기존 이슈 확인
+            existing = self.supabase_manager.client.table('issues').select('id').eq('id', 1).execute()
+
+            if not existing.data:
+                # 기본 이슈 생성
+                issue_data = {
+                    'id': 1,
+                    'title': '기본 이슈',
+                    'subtitle': '크롤러로 수집된 기사들을 위한 기본 이슈',
+                    'summary': '다양한 언론사에서 수집된 정치 관련 기사들을 포함하는 기본 이슈입니다.',
+                    'bias_left_pct': 0,
+                    'bias_center_pct': 0,
+                    'bias_right_pct': 0,
+                    'dominant_bias': 'center',
+                    'source_count': 0
+                }
+
+                result = self.supabase_manager.client.table('issues').insert(issue_data).execute()
+                logger.info("기본 이슈 생성 성공")
+                return True
+            else:
+                logger.info("기본 이슈가 이미 존재합니다")
+                return True
+
+        except Exception as e:
+            logger.error(f"기본 이슈 생성 실패: {str(e)}")
+            return False
+        
     async def __aenter__(self):
         self.session = aiohttp.ClientSession(
             headers={
@@ -302,10 +336,10 @@ class MKPoliticsCrawler:
         """기사를 데이터베이스에 저장합니다."""
         try:
             # 매일경제 언론사 정보 가져오기
-            media_outlet = self.supabase_manager.get_media_outlet("매일경제")
+            media_outlet = self.supabase_manager.get_media_outlet(self.media_name)
             if not media_outlet:
                 # 매일경제가 없으면 생성 (보수 성향)
-                media_id = self.supabase_manager.create_media_outlet("매일경제", "right")
+                media_id = self.supabase_manager.create_media_outlet(self.media_name, self.media_bias)
             else:
                 media_id = media_outlet['id']
             
@@ -316,8 +350,8 @@ class MKPoliticsCrawler:
                 'url': article_data['url'],
                 'published_at': article_data['published_at'].isoformat(),
                 'media_id': media_id,
-                'bias': 'right',  # 매일경제는 보수 성향
-                'issue_id': 6  # 임시 issue_id
+                'bias': self.media_bias,  # 매일경제는 보수 성향
+                'issue_id': 1  # 기본 이슈 ID
             }
             
             # 데이터베이스에 저장
@@ -428,6 +462,9 @@ class MKPoliticsCrawler:
         if not articles:
             return {"success": 0, "failed": 0}
         
+        # 기본 이슈 생성 확인
+        await self.create_default_issue()
+        
         success_count = 0
         failed_count = 0
         
@@ -453,4 +490,4 @@ async def main():
         await crawler.run()
 
 if __name__ == "__main__":
-    asyncio.run(asyncio.run(main()))
+    asyncio.run(main())

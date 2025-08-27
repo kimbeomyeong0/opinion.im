@@ -20,10 +20,13 @@ from datetime import datetime
 import re
 from urllib.parse import urljoin
 import logging
-from utils.supabase_manager_unified import UnifiedSupabaseManager
 import sys
 import os
+
+# 프로젝트 루트 디렉토리를 Python 경로에 추가
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+
+from utils.supabase_manager_unified import UnifiedSupabaseManager
 from utils.common.html_parser import HTMLParserUtils
 from playwright.async_api import async_playwright
 
@@ -243,7 +246,7 @@ class MBCPoliticsCrawler:
             else:
                 # 새 기사 삽입 (올바른 테이블 구조 사용)
                 insert_data = {
-                    'issue_id': self.issue_id,
+                    'issue_id': self.issue_id,  # 기본 이슈 ID 사용
                     'media_id': self.media_id,
                     'title': article_data['title'],
                     'url': article_data['url'],
@@ -277,8 +280,12 @@ class MBCPoliticsCrawler:
         ))
         
         try:
-            # 1. 기사 링크 수집
-            self.console.print("\n[bold yellow]1단계: 기사 링크 수집[/bold yellow]")
+            # 1. 기본 이슈 생성
+            self.console.print("\n[bold yellow]1단계: 기본 이슈 생성[/bold yellow]")
+            await self.create_default_issue()
+            
+            # 2. 기사 링크 수집
+            self.console.print("\n[bold yellow]2단계: 기사 링크 수집[/bold yellow]")
             article_links = await self.get_politics_article_links()
             
             if not article_links:
@@ -288,8 +295,8 @@ class MBCPoliticsCrawler:
             self.stats['total_found'] = len(article_links)
             self.console.print(f"[green]총 {len(article_links)}개의 기사 링크를 발견했습니다.[/green]")
             
-            # 2. 기사 내용 수집 및 저장
-            self.console.print("\n[bold yellow]2단계: 기사 내용 수집 및 저장[/bold yellow]")
+            # 3. 기사 내용 수집 및 저장
+            self.console.print("\n[bold yellow]3단계: 기사 내용 수집 및 저장[/bold yellow]")
             
             with Progress(
                 SpinnerColumn(),
@@ -324,7 +331,7 @@ class MBCPoliticsCrawler:
                     
                     await asyncio.sleep(self.delay)
             
-            # 3. 결과 요약
+            # 4. 결과 요약
             self.stats['end_time'] = time.time()
             duration = self.stats['end_time'] - self.stats['start_time']
             
@@ -363,6 +370,41 @@ class MBCPoliticsCrawler:
         except Exception as e:
             print(f"❌ 기사 수집 실패: {str(e)}")
             return getattr(self, 'articles', [])
+
+    async def create_default_issue(self):
+        """기본 이슈를 생성합니다."""
+        try:
+            # 기존 이슈 확인
+            existing = self.supabase.client.table('issues').select('id').eq('id', 1).execute()
+            
+            if not existing.data:
+                # 기본 이슈 생성
+                issue_data = {
+                    'id': 1,
+                    'title': '기본 이슈',
+                    'subtitle': '크롤러로 수집된 기사들을 위한 기본 이슈',
+                    'summary': '다양한 언론사에서 수집된 정치 관련 기사들을 포함하는 기본 이슈입니다.',
+                    'bias_left_pct': 0,
+                    'bias_center_pct': 0,
+                    'bias_right_pct': 0,
+                    'dominant_bias': 'center',
+                    'source_count': 0
+                }
+                
+                result = self.supabase.client.table('issues').insert(issue_data).execute()
+                if result.data:
+                    self.console.print("[green]기본 이슈 생성 성공[/green]")
+                    return True
+                else:
+                    self.console.print("[red]기본 이슈 생성 실패[/red]")
+                    return False
+            else:
+                self.console.print("[yellow]기본 이슈가 이미 존재합니다.[/yellow]")
+                return True
+                
+        except Exception as e:
+            self.console.print(f"[red]기본 이슈 생성 오류: {str(e)}[/red]")
+            return False
 
 async def main():
     async with MBCPoliticsCrawler() as crawler:

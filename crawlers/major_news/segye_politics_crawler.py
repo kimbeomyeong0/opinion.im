@@ -8,6 +8,8 @@
 import asyncio
 import aiohttp
 import logging
+import sys
+import os
 from datetime import datetime
 from bs4 import BeautifulSoup
 from typing import List, Optional, Dict, Any
@@ -17,6 +19,10 @@ from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TimeEl
 from rich.table import Table
 from rich.panel import Panel
 from rich.text import Text
+
+# 모듈 경로 추가
+sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+
 from utils.supabase_manager_unified import UnifiedSupabaseManager
 from playwright.async_api import async_playwright
 
@@ -33,6 +39,11 @@ class SegyePoliticsCrawler:
         self.console = Console()
         self.supabase_manager = UnifiedSupabaseManager()
         
+        # 미디어 정보 설정
+        self.media_name = "세계일보"
+        self.media_bias = "Right"  # 세계일보는 우편향 성향
+        self.media_id = None  # media_outlets에서 가져올 예정
+        
         # 세션 설정
         self.session = None
         self.headers = {
@@ -45,6 +56,52 @@ class SegyePoliticsCrawler:
         self.failed_articles = 0
         self.start_time = None
         
+        # media_outlets에서 세계일보 정보 가져오기
+        self._init_media_outlet()
+        
+    def _init_media_outlet(self):
+        """media_outlets에서 세계일보 정보를 초기화합니다."""
+        try:
+            media_outlet = self.supabase_manager.get_media_outlet(self.media_name)
+            if media_outlet:
+                self.media_id = media_outlet['id']
+                logger.info(f"✅ 세계일보 media_id: {self.media_id}, bias: {self.media_bias}")
+            else:
+                # 세계일보가 없으면 생성
+                self.media_id = self.supabase_manager.create_media_outlet(self.media_name, self.media_bias)
+                logger.info(f"✅ 세계일보 생성됨 - media_id: {self.media_id}, bias: {self.media_bias}")
+        except Exception as e:
+            logger.error(f"세계일보 media_outlet 초기화 실패: {str(e)}")
+            self.media_id = 16  # 기본값 사용
+    
+    async def create_default_issue(self):
+        """기본 이슈가 존재하는지 확인하고 없으면 생성합니다."""
+        try:
+            # issues 테이블에서 id=1이 존재하는지 확인
+            result = self.supabase_manager.supabase.table('issues').select('id').eq('id', 1).execute()
+            
+            if not result.data:
+                # 기본 이슈가 없으면 생성
+                issue_data = {
+                    'id': 1,
+                    'title': '기본 이슈',
+                    'subtitle': '기본 이슈 부제목',
+                    'summary': '기본 이슈 요약',
+                    'bias_left_pct': 0,
+                    'bias_center_pct': 0,
+                    'bias_right_pct': 0,
+                    'dominant_bias': 'Center',
+                    'source_count': 0
+                }
+                
+                self.supabase_manager.supabase.table('issues').insert(issue_data).execute()
+                logger.info("기본 이슈가 생성되었습니다")
+            else:
+                logger.info("기본 이슈가 이미 존재합니다")
+                
+        except Exception as e:
+            logger.error(f"기본 이슈 확인/생성 실패: {str(e)}")
+    
     async def __aenter__(self):
         """비동기 컨텍스트 매니저 진입"""
         self.session = aiohttp.ClientSession(headers=self.headers)
@@ -529,7 +586,10 @@ class SegyePoliticsCrawler:
         self.start_time = datetime.now()
         
         try:
-            # 1단계: 기사 링크 수집
+            # 1단계: 기본 이슈 확인/생성
+            await self.create_default_issue()
+            
+            # 2단계: 기사 링크 수집
             self.console.print("\n📋 1단계: 기사 링크 수집")
             
             # Playwright를 사용하여 JavaScript 동적 로딩 처리
@@ -541,7 +601,7 @@ class SegyePoliticsCrawler:
             
             self.console.print(f"✓ {len(article_links)}개의 기사 링크를 수집했습니다.")
             
-            # 2단계: 기사 상세 정보 수집
+            # 3단계: 기사 상세 정보 수집
             self.console.print("\n📰 2단계: 기사 상세 정보 수집")
             
             with Progress(
@@ -596,7 +656,7 @@ class SegyePoliticsCrawler:
                     if (i + 1) % 10 == 0:
                         progress.update(task, description=f"기사 정보 수집 중... ({i + 1}/{len(article_links)})")
             
-            # 3단계: 결과 표시
+            # 4단계: 결과 표시
             self._display_results()
             
         except Exception as e:
@@ -656,6 +716,9 @@ class SegyePoliticsCrawler:
         if not articles:
             return {"success": 0, "failed": 0}
         
+        # 기본 이슈 확인/생성
+        await self.create_default_issue()
+        
         success_count = 0
         failed_count = 0
         
@@ -680,4 +743,4 @@ async def main():
         await crawler.crawl_articles()
 
 if __name__ == "__main__":
-    asyncio.run(asyncio.run(main()))
+    asyncio.run(main())

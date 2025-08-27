@@ -23,7 +23,10 @@ from urllib.parse import urljoin, urlparse
 import logging
 import sys
 import os
-sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..', 'utils'))
+
+# 모듈 경로 추가
+sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+
 from utils.supabase_manager_unified import UnifiedSupabaseManager
 
 # 로깅 설정
@@ -39,13 +42,64 @@ class SedailyPoliticsCrawler:
         self.delay = 0.02  # 매우 빠른 크롤링을 위해 딜레이 최소화
         self.debug = debug
         
+        # 미디어 정보 설정
+        self.media_name = "서울경제"
+        self.media_bias = "Right"  # 서울경제는 우편향 성향
+        self.media_id = None  # media_outlets에서 가져올 예정
+        
         # Supabase 매니저 초기화
         try:
             self.supabase_manager = UnifiedSupabaseManager()
             self.console.print("[green]Supabase 클라이언트 초기화 성공[/green]")
+            
+            # media_outlets에서 서울경제 정보 가져오기
+            self._init_media_outlet()
         except Exception as e:
             self.console.print(f"[red]Supabase 초기화 실패: {str(e)}[/red]")
             raise
+    
+    def _init_media_outlet(self):
+        """media_outlets에서 서울경제 정보를 초기화합니다."""
+        try:
+            media_outlet = self.supabase_manager.get_media_outlet(self.media_name)
+            if media_outlet:
+                self.media_id = media_outlet['id']
+                self.console.print(f"✅ 서울경제 media_id: {self.media_id}, bias: {self.media_bias}")
+            else:
+                # 서울경제가 없으면 생성
+                self.media_id = self.supabase_manager.create_media_outlet(self.media_name, self.media_bias)
+                self.console.print(f"✅ 서울경제 생성됨 - media_id: {self.media_id}, bias: {self.media_bias}")
+        except Exception as e:
+            self.console.print(f"[red]서울경제 media_outlet 초기화 실패: {str(e)}[/red]")
+            self.media_id = 15  # 기본값 사용
+    
+    async def create_default_issue(self):
+        """기본 이슈가 존재하는지 확인하고 없으면 생성합니다."""
+        try:
+            # issues 테이블에서 id=1이 존재하는지 확인
+            result = self.supabase_manager.supabase.table('issues').select('id').eq('id', 1).execute()
+            
+            if not result.data:
+                # 기본 이슈가 없으면 생성
+                issue_data = {
+                    'id': 1,
+                    'title': '기본 이슈',
+                    'subtitle': '기본 이슈 부제목',
+                    'summary': '기본 이슈 요약',
+                    'bias_left_pct': 0,
+                    'bias_center_pct': 0,
+                    'bias_right_pct': 0,
+                    'dominant_bias': 'Center',
+                    'source_count': 0
+                }
+                
+                self.supabase_manager.supabase.table('issues').insert(issue_data).execute()
+                logger.info("기본 이슈가 생성되었습니다")
+            else:
+                logger.info("기본 이슈가 이미 존재합니다")
+                
+        except Exception as e:
+            logger.error(f"기본 이슈 확인/생성 실패: {str(e)}")
     
     async def __aenter__(self):
         self.session = aiohttp.ClientSession(
@@ -262,12 +316,12 @@ class SedailyPoliticsCrawler:
         """기사를 데이터베이스에 저장합니다."""
         try:
             # 서울경제 언론사 정보 가져오기
-            media_outlet = self.supabase_manager.get_media_outlet("서울경제")
-            if not media_outlet:
-                # 서울경제가 없으면 생성 (보수 성향)
-                media_id = self.supabase_manager.create_media_outlet("서울경제", "right")
-            else:
-                media_id = media_outlet['id']
+            # media_outlet = self.supabase_manager.get_media_outlet("서울경제") # 이 부분은 _init_media_outlet에서 처리됨
+            # if not media_outlet:
+            #     # 서울경제가 없으면 생성 (보수 성향)
+            #     media_id = self.supabase_manager.create_media_outlet("서울경제", "right")
+            # else:
+            #     media_id = media_outlet['id']
             
             # 기사 데이터 구성
             processed_data = {
@@ -275,9 +329,9 @@ class SedailyPoliticsCrawler:
                 'content': article_data['content'],
                 'url': article_data['url'],
                 'published_at': article_data['published_at'].isoformat(),
-                'media_id': media_id,
-                'bias': 'right',  # 서울경제는 보수 성향
-                'issue_id': 6  # 임시 issue_id
+                'media_id': self.media_id, # 이 부분은 _init_media_outlet에서 처리됨
+                'bias': self.media_bias, # 이 부분은 __init__에서 처리됨
+                'issue_id': 1  # 이 부분은 create_default_issue에서 처리됨
             }
             
             # 데이터베이스에 저장
@@ -388,6 +442,9 @@ class SedailyPoliticsCrawler:
         if not articles:
             return {"success": 0, "failed": 0}
         
+        # 기본 이슈 확인/생성
+        await self.create_default_issue()
+        
         success_count = 0
         failed_count = 0
         
@@ -413,4 +470,4 @@ async def main():
         await crawler.run()
 
 if __name__ == "__main__":
-    asyncio.run(asyncio.run(main()))
+    asyncio.run(main())
